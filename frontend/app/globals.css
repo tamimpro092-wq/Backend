@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+
+  --bg0: #05060a;
+  --bg1: #070a12;
+
+  --card: rgba(10, 14, 25, 0.70);
+  --stroke: rgba(120, 200, 255, 0.14);
+
+  --txt: #e5e7eb;
+  --muted: rgba(229, 231, 235, 0.65);
+
+  --cyan: #22d3ee;
+  --violet: #a78bfa;
+  --pink: #fb7185;
+  --lime: #a3e635;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(1000px 600px at 20% 10%, rgba(34, 211, 238, 0.12), transparent 60%),
+    radial-gradient(900px 500px at 80% 30%, rgba(167, 139, 250, 0.12), transparent 60%),
+    radial-gradient(900px 500px at 40% 80%, rgba(251, 113, 133, 0.10), transparent 60%),
+    linear-gradient(180deg, var(--bg0), var(--bg1));
+  color: var(--txt);
+}
+
+a { color: inherit; }
+
+/* Reusable neon UI helpers */
+.neon-card {
+  background: var(--card);
+  border: 1px solid var(--stroke);
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.06),
+    0 0 40px rgba(34, 211, 238, 0.10),
+    inset 0 0 35px rgba(167, 139, 250, 0.06);
+  backdrop-filter: blur(10px);
+}
+
+.neon-glow {
+  box-shadow:
+    0 0 18px rgba(34,211,238,0.35),
+    0 0 40px rgba(167,139,250,0.18);
+}
+
+.neon-divider {
+  border-top: 1px solid rgba(120, 200, 255, 0.12);
+}
