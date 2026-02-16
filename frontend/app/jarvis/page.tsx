@@ -90,7 +90,7 @@ export default function JarvisPage() {
   return (
     <div className="space-y-4">
       <Card
-        title="Jarvis Voice Mode"
+        title="Mira Voice Mode"
         right={
           <div className="flex gap-2 items-center">
             <Badge variant={listening ? "ok" : "neutral"}>{listening ? "listening" : "idle"}</Badge>
@@ -103,9 +103,7 @@ export default function JarvisPage() {
           </div>
         }
       >
-        <p className="text-xs text-slate-300">
-          Voice uses Web Speech API. If unavailable, type a command and submit.
-        </p>
+        <p className="text-xs text-slate-300">Voice uses Web Speech API. If unavailable, type a command and submit.</p>
         <div className="mt-3 flex flex-col gap-2">
           <textarea
             value={text}
