@@ -50,5 +50,18 @@ class Settings(BaseSettings):
     WHATSAPP_ACCESS_TOKEN: str = ""
     WHATSAPP_VERIFY_TOKEN: str = "dev-verify-token"
 
+   # Live research: Google CSE
+    GOOGLE_CSE_API_KEY: str = ""
+    GOOGLE_CSE_CX: str = ""
+
+  # Live research: eBay
+  EBAY_CLIENT_ID: str = ""
+  EBAY_CLIENT_SECRET: str = ""
+  EBAY_MARKETPLACE_ID: str = "EBAY_US"
+
+  # Stock images: Pexels
+  PEXELS_API_KEY: str = ""
+
+
 
 settings = Settings()
