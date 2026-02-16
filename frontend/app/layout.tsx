@@ -2,8 +2,8 @@ import "./globals.css";
 import Nav from "./components/Nav";
 
 export const metadata = {
-  title: "JARVIS Mode",
-  description: "Overnight E-commerce Autopilot",
+  title: "LAZY Mode",
+  description: "MULTI TASK",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -20,7 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <div className="md:hidden neon-card border-x-0 border-t-0 rounded-none p-3">
               <div className="flex items-center justify-between">
                 <div className="font-semibold">
-                  JARVIS<span className="text-[color:var(--cyan)]">.AI</span>
+                  MIRA<span className="text-[color:var(--cyan)]">.AI</span>
                 </div>
                 <div className="text-xs text-[color:var(--muted)]">Menu in sidebar (desktop)</div>
               </div>

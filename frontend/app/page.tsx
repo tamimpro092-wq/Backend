@@ -19,8 +19,8 @@ export default function Home() {
           AI CONTROL DECK
         </div>
         <div className="mt-2 text-3xl font-semibold">
-          Overnight E-commerce Autopilot{" "}
-          <span className="text-[color:var(--cyan)]">— JARVIS Mode</span>
+          MULTI AGENT MODULE{" "}
+          <span className="text-[color:var(--cyan)]">— LAZY Mode</span>
         </div>
         <p className="mt-2 text-sm text-[color:var(--muted)]">
           Click any module below to open its full page.
@@ -34,7 +34,7 @@ export default function Home() {
             Approvals required for risky actions
           </span>
           <span className="text-xs px-3 py-1 rounded-full border border-white/10 bg-white/5">
-            Neon UI mode
+            
           </span>
         </div>
       </div>
@@ -63,7 +63,7 @@ export default function Home() {
       <div className="neon-card rounded-2xl p-5">
         <div className="text-sm font-semibold">Quick start</div>
         <div className="mt-2 text-sm text-[color:var(--muted)]">
-          Go to <span className="text-[color:var(--cyan)]">Jarvis</span> and try:
+          Go to <span className="text-[color:var(--cyan)]">MIRA</span> and try:
         </div>
         <pre className="mt-3 text-xs overflow-auto rounded-xl border border-white/10 bg-black/30 p-3">
 Add a winning product and prepare it to sell
