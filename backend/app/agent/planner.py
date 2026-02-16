@@ -38,9 +38,39 @@ def plan(command_text: str) -> List[ToolCall]:
         calls.append(ToolCall(name="content.triage_inbox", args={"limit": 50}))
         return calls
 
-    # ✅ NEW: Full Shopify autopilot (no approval)
-    if any(k in t for k in ["add a product", "add product", "add a product in my store", "add product in my store", "create a product in my store"]):
-        calls.append(ToolCall(name="shopify.autopilot_add_product", args={}))
+    # ✅ Full Shopify autopilot (one command)
+    # Supported examples:
+    # - "Add a product in my store"
+    # - "Add product in my store niche=home qty=50"
+    # - "Create a product in my store niche:\"beauty\" inventory=200"
+    if any(
+        k in t
+        for k in [
+            "add a product",
+            "add product",
+            "add a product in my store",
+            "add product in my store",
+            "create a product in my store",
+            "create product in my store",
+        ]
+    ):
+        args = {}
+        # niche parsing
+        m_niche = re.search(r"\bniche\s*[:=]\s*(\"[^\"]+\"|'[^']+'|[^,;\n]+)", raw, re.I)
+        if m_niche:
+            niche_val = m_niche.group(1).strip().strip('"').strip("'").strip()
+            if niche_val:
+                args["niche"] = niche_val
+
+        # qty / inventory parsing
+        m_qty = re.search(r"\b(?:qty|quantity|inventory|inventory_qty)\s*[:=]\s*(\d+)", raw, re.I)
+        if m_qty:
+            try:
+                args["inventory_qty"] = int(m_qty.group(1))
+            except Exception:
+                pass
+
+        calls.append(ToolCall(name="shopify.autopilot_add_product", args=args))
         return calls
 
     m = re.search(r"\bpublish product\s+(\d+)\b", t)
