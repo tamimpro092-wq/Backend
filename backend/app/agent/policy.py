@@ -14,6 +14,7 @@ class PolicyDecision:
     reason: str
 
 
+# Tools that can cause external side-effects (require approval)
 RISKY_TOOLS = (
     "shopify.publish_product",
     "facebook.create_post",
@@ -24,7 +25,7 @@ RISKY_TOOLS = (
     "local.exec",
 )
 
-# ✅ Allow Shopify autopilot to run (no approvals)
+# ✅ Allow autopilot to run without approvals (your requirement)
 ALWAYS_ALLOWED = (
     "shopify.autopilot_add_product",
 )
@@ -35,20 +36,25 @@ SAFE_PREFIXES = (
     "content.",
     "supplier.",
     "call_fallback.",
-    "facebook.queue_posts_forưA
+)
+
+SAFE_TOOLS = (
     "facebook.queue_posts_for_approval",
 )
 
 
 def evaluate(call: ToolCall, context: Dict[str, Any] | None = None) -> PolicyDecision:
-    name = call.name or ""
+    name = (call.name or "").strip()
 
-    # ✅ allow this tool to execute
     if name in ALWAYS_ALLOWED:
         return PolicyDecision(action="allowed", risk="high", reason="Shopify autopilot allowed")
 
-    if name.startswith(SAFE_PREFIXES):
+    if name in SAFE_TOOLS:
         return PolicyDecision(action="allowed", risk="low", reason="Safe tool")
+
+    for p in SAFE_PREFIXES:
+        if name.startswith(p):
+            return PolicyDecision(action="allowed", risk="low", reason="Safe tool")
 
     if name.startswith("local."):
         if not bool(settings.LOCAL_ACTIONS_ENABLED):
@@ -60,7 +66,7 @@ def evaluate(call: ToolCall, context: Dict[str, Any] | None = None) -> PolicyDec
             return PolicyDecision(
                 action="needs_approval",
                 risk="high",
-                reason="DRY_RUN: risky action requires approval (simulated if approved)",
+                reason="DRY_RUN: risky action requires approval",
             )
         return PolicyDecision(action="needs_approval", risk="high", reason="Risky external action requires approval")
 
