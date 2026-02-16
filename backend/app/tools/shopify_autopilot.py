@@ -11,7 +11,10 @@ from ..db import engine
 from ..models import ProductDraft
 from ..settings import settings
 from .stock_images import pexels_search_image
-from .research_multisource import find_winning_product_multisource
+from .research_multisource import (
+    find_winning_product_multisource,
+    find_winning_product_multisource_for_many,
+)
 
 
 def _shopify_headers() -> Dict[str, str]:
@@ -88,11 +91,27 @@ def add_product_full_auto(
     niche: str | None = None,
     inventory_qty: int | None = None,
 ) -> Dict[str, Any]:
-    niche_final = (niche or settings.STORE_NICHE or "general").strip()
+    """
+    Full automation:
+    - multi-source market research (Google CSE + eBay)
+    - SEO copy
+    - pricing
+    - stock image (Pexels)
+    - create ACTIVE product in Shopify
+    """
+    raw_niche = (niche or settings.STORE_NICHE or "general").strip()
+    niche_list = [x.strip() for x in raw_niche.split(",") if x.strip()]
+
     qty = int(inventory_qty or getattr(settings, "DEFAULT_INVENTORY_QTY", 100) or 100)
 
-    # 1) Multi-source live research (Google + eBay)
-    r = find_winning_product_multisource(niche=niche_final)
+    # 1) Multi-niche selection
+    if len(niche_list) <= 1:
+        niche_final = niche_list[0] if niche_list else "general"
+        r = find_winning_product_multisource(niche=niche_final)
+    else:
+        r = find_winning_product_multisource_for_many(niches=niche_list)
+        niche_final = r.get("chosen_niche") or (niche_list[0] if niche_list else "general")
+
     if not r.get("ok"):
         return {"ok": False, "error": "live_research_failed", "details": r}
 
@@ -116,12 +135,12 @@ def add_product_full_auto(
     body_html = _seo_html_description(seo_title, short_desc, bullets, keywords)
     tags = _tags_from_keywords(keywords)
 
-    # 4) Stock image (Pexels)
+    # 4) Stock image
     img_query = f"{seo_title} product photo"
     img = pexels_search_image(img_query, orientation="square")
     image_url = img.get("image_url") if img.get("ok") else None
 
-    # 5) Create Product on Shopify (or simulate)
+    # 5) DRY_RUN / missing creds
     if bool(settings.DRY_RUN) or not (settings.SHOPIFY_SHOP and settings.SHOPIFY_ACCESS_TOKEN):
         with Session(engine) as session:
             draft = ProductDraft(
@@ -154,9 +173,11 @@ def add_product_full_auto(
             "price": price,
             "compare_at": compare_at,
             "image_url": image_url,
+            "chosen_niche": niche_final,
             "note": "DRY_RUN or missing Shopify creds: product not created in Shopify.",
         }
 
+    # 6) Create product in Shopify
     create_url = f"https://{settings.SHOPIFY_SHOP}/admin/api/{settings.SHOPIFY_API_VERSION}/products.json"
 
     product_payload: Dict[str, Any] = {
@@ -195,6 +216,7 @@ def add_product_full_auto(
             shopify_id = prod.get("id")
             handle = prod.get("handle")
 
+        # Save to DB
         with Session(engine) as session:
             draft = ProductDraft(
                 title=seo_title,
@@ -233,7 +255,7 @@ def add_product_full_auto(
             "price": price,
             "compare_at": compare_at,
             "image_url": image_url,
-            "niche": niche_final,
+            "chosen_niche": niche_final,
             "confirmed_multisource": bool((r.get("top_pick") or {}).get("confirmed")),
         }
 
