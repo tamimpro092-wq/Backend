@@ -24,6 +24,12 @@ RISKY_TOOLS = (
     "local.exec",
 )
 
+# ✅ NEW: Tools that are safe enough to run without approvals
+# NOTE: This is exactly what you want for "one-command Shopify autopilot".
+ALWAYS_ALLOWED = (
+    "shopify.autopilot_add_product",
+)
+
 SAFE_PREFIXES = (
     "status.",
     "research.",
@@ -37,6 +43,11 @@ SAFE_PREFIXES = (
 def evaluate(call: ToolCall, context: Dict[str, Any] | None = None) -> PolicyDecision:
     name = call.name or ""
 
+    # ✅ Allow autopilot tool
+    if name in ALWAYS_ALLOWED:
+        # still show as medium/high risk but allow execution
+        return PolicyDecision(action="allowed", risk="high", reason="Shopify autopilot allowed")
+
     if name.startswith(SAFE_PREFIXES):
         return PolicyDecision(action="allowed", risk="low", reason="Safe tool")
 
@@ -46,9 +57,12 @@ def evaluate(call: ToolCall, context: Dict[str, Any] | None = None) -> PolicyDec
         return PolicyDecision(action="needs_approval", risk="high", reason="Local actions require approval")
 
     if name in RISKY_TOOLS:
-        # risky tools always require approval; tools will simulate in DRY_RUN
         if bool(settings.DRY_RUN):
-            return PolicyDecision(action="needs_approval", risk="high", reason="DRY_RUN: risky action requires approval (simulated if approved)")
+            return PolicyDecision(
+                action="needs_approval",
+                risk="high",
+                reason="DRY_RUN: risky action requires approval (simulated if approved)",
+            )
         return PolicyDecision(action="needs_approval", risk="high", reason="Risky external action requires approval")
 
     return PolicyDecision(action="blocked", risk="high", reason="Unknown tool")
