@@ -1,403 +1,86 @@
 from __future__ import annotations
 
-import base64
-import math
-import re
-from typing import Any, Dict, List, Optional
-
-import httpx
+import random
+from typing import Any, Dict, List
 
 from ..settings import settings
 
-_PRICE_RE = re.compile(r"(\$|USD\s*)(\d+(?:\.\d{1,2})?)", re.I)
+
+FALLBACK_CATALOG = {
+    "beauty": [
+        {"title": "Hydrating Hyaluronic Acid Serum", "description": "Daily hydration serum for smoother-looking skin.", "suggested_cost": 6.5},
+        {"title": "Vitamin C Brightening Face Serum", "description": "Brightening serum for an even-looking glow.", "suggested_cost": 7.2},
+        {"title": "Reusable Makeup Remover Pads (12 Pack)", "description": "Soft reusable pads for gentle cleansing and makeup removal.", "suggested_cost": 4.1},
+        {"title": "Dermaplaning Facial Razor Set (6 Pack)", "description": "Facial razors for smoother makeup application.", "suggested_cost": 3.8},
+    ],
+    "general": [
+        {"title": "LED Motion Sensor Night Light (2 Pack)", "description": "Auto on/off night lights for hallway, closet, stairs.", "suggested_cost": 5.5},
+        {"title": "Portable Mini Blender Bottle", "description": "Compact everyday mixer bottle for shakes and smoothies.", "suggested_cost": 8.0},
+    ],
+}
 
 
-def _tokenize(s: str) -> List[str]:
-    return re.findall(r"[a-z0-9]{3,}", (s or "").lower())
-
-
-def _median(xs: List[float]) -> Optional[float]:
-    xs = [x for x in xs if isinstance(x, (int, float)) and x > 0]
-    if not xs:
-        return None
-    xs.sort()
-    n = len(xs)
-    if n % 2 == 1:
-        return float(xs[n // 2])
-    return float((xs[n // 2 - 1] + xs[n // 2]) / 2.0)
-
-
-def _extract_prices(text: str) -> List[float]:
-    out: List[float] = []
-    for m in _PRICE_RE.finditer(text or ""):
-        try:
-            out.append(float(m.group(2)))
-        except Exception:
-            pass
-    return out
-
-
-# -----------------------
-# Google CSE
-# -----------------------
-_QUERY_TEMPLATES = [
-    "best selling {niche} products",
-    "top selling {niche} items",
-    "{niche} best sellers",
-    "trending {niche} products",
-    "most popular {niche} products",
-]
-
-
-def google_cse_search(query: str, num: int = 10) -> Dict[str, Any]:
-    """
-    Google Programmable Search / Custom Search JSON API.
-    Requires:
-      GOOGLE_CSE_API_KEY
-      GOOGLE_CSE_CX
-    """
-    if not settings.GOOGLE_CSE_API_KEY or not settings.GOOGLE_CSE_CX:
-        return {"ok": False, "error": "missing_google_cse_env"}
-
-    url = "https://www.googleapis.com/customsearch/v1"
-    params = {
-        "key": settings.GOOGLE_CSE_API_KEY,
-        "cx": settings.GOOGLE_CSE_CX,
-        "q": query,
-        "num": max(1, min(int(num), 10)),
-    }
-
-    try:
-        with httpx.Client(timeout=20.0) as client:
-            r = client.get(url, params=params)
-            if r.status_code >= 400:
-                return {
-                    "ok": False,
-                    "error": "google_cse_http_error",
-                    "status_code": r.status_code,
-                    "body": r.text,
-                }
-            return {"ok": True, "data": r.json()}
-    except Exception as e:
-        return {"ok": False, "error": "exception", "message": str(e)}
-
-
-def _score_google_item(title: str, snippet: str, niche_tokens: List[str]) -> float:
-    text = f"{(title or '').lower()} {(snippet or '').lower()}"
-    score = 0.0
-
-    if any(k in text for k in ["best seller", "bestseller", "top selling", "best-selling"]):
-        score += 4.0
-    if "trending" in text or "popular" in text:
-        score += 2.0
-    if any(y in text for y in ["2026", "2025"]):
-        score += 1.0
-
-    tokens = set(_tokenize(text))
-    overlap = sum(1 for nt in niche_tokens if nt in tokens)
-    score += min(5.0, overlap * 0.8)
-
-    if _extract_prices(text):
-        score += 1.0
-
-    if any(bad in text for bad in ["pdf", "login", "sign in", "captcha"]):
-        score -= 2.0
-
-    return score
-
-
-def google_candidates(niche: str, max_candidates: int = 8) -> Dict[str, Any]:
-    niche_clean = (niche or "general").strip()
-    niche_tokens = _tokenize(niche_clean)
-
-    all_items: List[Dict[str, Any]] = []
-    debug: List[Dict[str, Any]] = []
-
-    for template in _QUERY_TEMPLATES:
-        q = template.format(niche=niche_clean)
-        res = google_cse_search(q, num=10)
-        debug.append({"query": q, "ok": res.get("ok"), "error": res.get("error")})
-        if not res.get("ok"):
-            continue
-
-        items = (res["data"] or {}).get("items") or []
-        for it in items:
-            title = it.get("title") or ""
-            snippet = it.get("snippet") or ""
-            link = it.get("link") or ""
-            score = _score_google_item(title, snippet, niche_tokens)
-            all_items.append({"title": title, "snippet": snippet, "link": link, "score": score})
-
-    if not all_items:
-        return {"ok": False, "error": "no_google_results", "debug": debug}
-
-    all_items.sort(key=lambda x: x["score"], reverse=True)
-    top = all_items[:max_candidates]
-
-    # Convert into “product concepts”
-    concepts: List[Dict[str, Any]] = []
-    for it in top:
-        raw_title = it["title"]
-        concept = re.sub(r"^(best|top|trending|most popular)\s+", "", raw_title, flags=re.I).strip()
-        concept = re.sub(r"(\|\s*.+$)", "", concept).strip()
-        if len(concept) < 8:
-            continue
-        concepts.append(
-            {
-                "concept": concept,
-                "score": float(it["score"]),
-                "evidence": it,
-                "tokens": _tokenize(concept),
-            }
-        )
-
-    if not concepts:
-        return {"ok": False, "error": "no_google_concepts", "debug": debug, "top": top}
-
-    concepts.sort(key=lambda x: x["score"], reverse=True)
-    return {"ok": True, "source": "google_cse", "niche": niche_clean, "concepts": concepts, "debug": debug}
-
-
-# -----------------------
-# eBay Browse API (OAuth client credentials)
-# -----------------------
-def _ebay_app_token() -> Dict[str, Any]:
-    """
-    Client-credentials to get an application token for eBay REST APIs.
-    Requires:
-      EBAY_CLIENT_ID
-      EBAY_CLIENT_SECRET
-    """
-    cid = settings.EBAY_CLIENT_ID or ""
-    csec = settings.EBAY_CLIENT_SECRET or ""
-    if not cid or not csec:
-        return {"ok": False, "error": "missing_ebay_env"}
-
-    token_url = "https://api.ebay.com/identity/v1/oauth2/token"
-    basic = base64.b64encode(f"{cid}:{csec}".encode("utf-8")).decode("ascii")
-    headers = {
-        "Authorization": f"Basic {basic}",
-        "Content-Type": "application/x-www-form-urlencoded",
-    }
-    data = {
-        "grant_type": "client_credentials",
-        "scope": "https://api.ebay.com/oauth/api_scope",
-    }
-
-    try:
-        with httpx.Client(timeout=20.0) as client:
-            r = client.post(token_url, headers=headers, data=data)
-            if r.status_code >= 400:
-                return {
-                    "ok": False,
-                    "error": "ebay_token_http_error",
-                    "status_code": r.status_code,
-                    "body": r.text,
-                }
-            js = r.json()
-            token = js.get("access_token")
-            if not token:
-                return {"ok": False, "error": "ebay_token_missing", "body": js}
-            return {"ok": True, "access_token": token, "expires_in": js.get("expires_in")}
-    except Exception as e:
-        return {"ok": False, "error": "exception", "message": str(e)}
-
-
-def ebay_search(query: str, limit: int = 20) -> Dict[str, Any]:
-    tok = _ebay_app_token()
-    if not tok.get("ok"):
-        return tok
-
-    marketplace = (settings.EBAY_MARKETPLACE_ID or "EBAY_US").strip()
-    url = "https://api.ebay.com/buy/browse/v1/item_summary/search"
-    headers = {
-        "Authorization": f"Bearer {tok['access_token']}",
-        "X-EBAY-C-MARKETPLACE-ID": marketplace,
-        "Accept": "application/json",
-    }
-    params = {"q": query, "limit": max(1, min(int(limit), 50))}
-
-    try:
-        with httpx.Client(timeout=20.0) as client:
-            r = client.get(url, headers=headers, params=params)
-            if r.status_code >= 400:
-                return {
-                    "ok": False,
-                    "error": "ebay_search_http_error",
-                    "status_code": r.status_code,
-                    "body": r.text,
-                }
-            return {"ok": True, "data": r.json(), "marketplace": marketplace}
-    except Exception as e:
-        return {"ok": False, "error": "exception", "message": str(e)}
-
-
-def ebay_signal_for_concept(concept: str) -> Dict[str, Any]:
-    q = (concept or "").strip()
-    if not q:
-        return {"ok": False, "error": "empty_concept"}
-
-    res = ebay_search(q, limit=30)
-    if not res.get("ok"):
-        return res
-
-    data = res["data"] or {}
-    total = data.get("total")
-    items = data.get("itemSummaries") or []
-
-    prices: List[float] = []
-    for it in items:
-        price = (it.get("price") or {}).get("value")
-        try:
-            if price is not None:
-                prices.append(float(price))
-        except Exception:
-            pass
-
-    med = _median(prices)
+def _pick_fallback(niche: str) -> Dict[str, Any]:
+    n = (niche or "general").strip().lower()
+    if n not in FALLBACK_CATALOG:
+        n = "general"
+    item = random.choice(FALLBACK_CATALOG[n])
     return {
         "ok": True,
-        "query": q,
-        "marketplace": res.get("marketplace"),
-        "total": total,
-        "items_count": len(items),
-        "median_price": med,
-    }
-
-
-# -----------------------
-# Multi-source confirmation
-# -----------------------
-def find_winning_product_multisource(niche: str) -> Dict[str, Any]:
-    """
-    Multi-source confirmation:
-    - Google CSE candidates for best-seller / trending
-    - eBay browse search as demand proxy
-    - pick highest combined score, prefer confirmed
-    """
-    niche_clean = (niche or "general").strip()
-
-    g = google_candidates(niche_clean, max_candidates=8)
-    if not g.get("ok"):
-        return {"ok": False, "error": "google_unavailable_or_no_results", "details": g}
-
-    concepts = g["concepts"]
-    scored: List[Dict[str, Any]] = []
-
-    # Keep API usage small
-    for c in concepts[:6]:
-        concept = c["concept"]
-        ebay_sig = ebay_signal_for_concept(concept)
-
-        ebay_score = 0.0
-        confirmed = False
-
-        if ebay_sig.get("ok"):
-            items_count = int(ebay_sig.get("items_count") or 0)
-            total = ebay_sig.get("total")
-            med_price = ebay_sig.get("median_price")
-
-            ebay_score += min(4.0, items_count / 8.0)
-
-            if isinstance(total, int):
-                ebay_score += min(3.0, math.log10(max(1, total)) / 2.0)
-
-            if med_price and isinstance(med_price, (int, float)) and med_price > 0:
-                ebay_score += 1.0
-
-            # confirmation gate
-            confirmed = items_count >= 8
-
-        combined = float(c["score"]) + float(ebay_score)
-        scored.append(
-            {
-                "concept": concept,
-                "google_score": float(c["score"]),
-                "ebay_score": float(ebay_score),
-                "combined_score": combined,
-                "confirmed": confirmed,
-                "google_evidence": c["evidence"],
-                "ebay_signal": ebay_sig,
-            }
-        )
-
-    confirmed_list = [x for x in scored if x["confirmed"]]
-    pool = confirmed_list if confirmed_list else scored
-    pool.sort(key=lambda x: x["combined_score"], reverse=True)
-    best = pool[0]
-
-    med_price = (best.get("ebay_signal") or {}).get("median_price")
-    suggested_cost = 10.0
-    if isinstance(med_price, (int, float)) and med_price > 0:
-        suggested_cost = max(6.0, float(med_price) * 0.35)
-
-    return {
-        "ok": True,
-        "source": "google_cse+ebay_browse",
-        "niche": niche_clean,
         "top_pick": {
-            "title": best["concept"],
-            "description": f"Selected via multi-source confirmation (Google best-seller signals + eBay demand proxy) for niche: {niche_clean}.",
-            "suggested_cost": round(float(suggested_cost), 2),
-            "confirmed": bool(best["confirmed"]),
-            "evidence": {
-                "google": best["google_evidence"],
-                "ebay": best["ebay_signal"],
-            },
+            "title": item["title"],
+            "description": item["description"],
+            "suggested_cost": item["suggested_cost"],
+            "source": "fallback_catalog",
+            "confirmed": False,
         },
-        "candidates": pool[:5],
-        "google_debug": g.get("debug"),
+        "chosen_niche": n,
+        "sources_used": ["fallback_catalog"],
     }
+
+
+def find_winning_product_multisource(niche: str = "general") -> Dict[str, Any]:
+    n = (niche or "general").strip()
+
+    # 1) Google (only if configured)
+    has_google = bool(settings.GOOGLE_CSE_API_KEY) and bool(settings.GOOGLE_CSE_CX)
+    if has_google:
+        try:
+            from .research_google import google_find_winning_product
+            g = google_find_winning_product(niche=n)
+            if g and g.get("ok"):
+                g["chosen_niche"] = n
+                g["sources_used"] = list(dict.fromkeys((g.get("sources_used") or []) + ["google"]))
+                return g
+        except Exception:
+            pass
+
+    # 2) eBay (only if configured)
+    has_ebay = bool(settings.EBAY_CLIENT_ID) and bool(settings.EBAY_CLIENT_SECRET)
+    if has_ebay:
+        try:
+            from .research_ebay import ebay_find_winning_product
+            e = ebay_find_winning_product(niche=n)
+            if e and e.get("ok"):
+                e["chosen_niche"] = n
+                e["sources_used"] = list(dict.fromkeys((e.get("sources_used") or []) + ["ebay"]))
+                return e
+        except Exception:
+            pass
+
+    # 3) Always works fallback
+    return _pick_fallback(n)
 
 
 def find_winning_product_multisource_for_many(niches: List[str]) -> Dict[str, Any]:
-    """
-    Multi-niche:
-    Try each niche with multi-source confirmation, return the single best overall.
-    Prefer confirmed, then highest combined score.
-    """
-    cleaned = [(n or "").strip() for n in (niches or []) if (n or "").strip()]
-    if not cleaned:
-        return {"ok": False, "error": "no_niches_provided"}
+    niches = [x.strip() for x in (niches or []) if x and x.strip()]
+    if not niches:
+        return find_winning_product_multisource("general")
 
-    all_results: List[Dict[str, Any]] = []
-    errors: List[Dict[str, Any]] = []
+    for n in niches:
+        r = find_winning_product_multisource(n)
+        if r.get("ok"):
+            r["chosen_niche"] = r.get("chosen_niche") or n
+            return r
 
-    for niche in cleaned[:15]:
-        r = find_winning_product_multisource(niche=niche)
-        if not r.get("ok"):
-            errors.append({"niche": niche, "error": r.get("error"), "details": r.get("details")})
-            continue
-
-        candidates = r.get("candidates") or []
-        top_score = None
-        if candidates and isinstance(candidates[0], dict):
-            top_score = candidates[0].get("combined_score")
-
-        all_results.append(
-            {
-                "niche": niche,
-                "result": r,
-                "top_combined_score": float(top_score) if isinstance(top_score, (int, float)) else None,
-                "confirmed": bool((r.get("top_pick") or {}).get("confirmed")),
-            }
-        )
-
-    if not all_results:
-        return {"ok": False, "error": "all_niches_failed", "errors": errors}
-
-    confirmed = [x for x in all_results if x["confirmed"]]
-    pool = confirmed if confirmed else all_results
-
-    def _key(x: Dict[str, Any]) -> float:
-        s = x.get("top_combined_score")
-        return float(s) if isinstance(s, (int, float)) else -1e9
-
-    pool.sort(key=_key, reverse=True)
-    best = pool[0]
-
-    out = best["result"]
-    out["chosen_niche"] = best["niche"]
-    out["multi_niche_tested"] = cleaned
-    out["multi_niche_errors"] = errors
-    return out
+    return _pick_fallback(niches[0])
