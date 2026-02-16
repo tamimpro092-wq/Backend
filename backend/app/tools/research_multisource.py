@@ -1,95 +1,153 @@
 from __future__ import annotations
 
 import random
-from typing import Any, Dict, List
+import re
+from typing import Any, Dict, List, Tuple
 
-from ..settings import settings
+from sqlmodel import Session, select
+
+from ..db import engine
+from ..models import ProductDraft
 
 
-# ===============================
-#  ALWAYS-WORKING FALLBACK DATA
-# ===============================
-
-FALLBACK_CATALOG = {
+CATALOG: Dict[str, List[Dict[str, Any]]] = {
+    "electronics": [
+        {"base": "Smart Tag Key Finder (Bluetooth)", "desc": "Track keys, wallets, and bags with a compact Bluetooth tracker.", "cost": (250, 550)},
+        {"base": "Magnetic Phone Car Mount", "desc": "Strong magnetic mount for safer hands-free navigation.", "cost": (180, 450)},
+        {"base": "USB-C Fast Charger (20W)", "desc": "Fast, safe charging for phones and small devices.", "cost": (220, 520)},
+        {"base": "Foldable Phone Stand", "desc": "Adjustable stand for desk viewing, calls, and videos.", "cost": (120, 350)},
+        {"base": "Cable Organizer Clips (12 Pack)", "desc": "Keep your cables neat, tidy, and easy to reach.", "cost": (90, 220)},
+    ],
+    "home decor": [
+        {"base": "Stretch Sofa Cover (Washable)", "desc": "Upgrade your old sofa in minutes with a premium stretch cover.", "cost": (900, 1500)},
+        {"base": "LED Motion Sensor Night Light (2 Pack)", "desc": "Automatic night light for hallway, closet, and stairs.", "cost": (350, 700)},
+        {"base": "Minimalist Wall Hooks Set", "desc": "Strong wall hooks for keys, bags, and essentials.", "cost": (250, 600)},
+        {"base": "Decorative Cushion Cover (18x18)", "desc": "Refresh your living room instantly with premium cushion covers.", "cost": (250, 550)},
+    ],
+    "kitchen": [
+        {"base": "Oil Spray Bottle", "desc": "Fine mist sprayer for healthier and even cooking.", "cost": (250, 600)},
+        {"base": "Sink Caddy Organizer", "desc": "Keep sponge/brush tidy and dry in your kitchen sink.", "cost": (220, 520)},
+        {"base": "Reusable Food Storage Bags (Set of 4)", "desc": "Leak-resistant reusable bags for snacks and meal prep.", "cost": (450, 950)},
+    ],
     "beauty": [
-        {
-            "title": "Hydrating Hyaluronic Acid Serum",
-            "description": "Lightweight daily hydration serum for smoother-looking skin.",
-            "suggested_cost": 6.5,
-        },
-        {
-            "title": "Vitamin C Brightening Face Serum",
-            "description": "Brightening serum for a glowing complexion.",
-            "suggested_cost": 7.2,
-        },
-        {
-            "title": "Reusable Makeup Remover Pads (12 Pack)",
-            "description": "Eco-friendly soft cleansing pads for daily use.",
-            "suggested_cost": 4.1,
-        },
-        {
-            "title": "Dermaplaning Facial Razor Set (6 Pack)",
-            "description": "Precision razors for smoother makeup application.",
-            "suggested_cost": 3.8,
-        },
+        {"base": "Vitamin C Brightening Face Serum", "desc": "Glow-boosting skincare serum for brighter-looking skin.", "cost": (350, 800)},
+        {"base": "Hyaluronic Acid Hydrating Serum", "desc": "Daily hydration serum for smoother-looking skin.", "cost": (350, 800)},
+        {"base": "Reusable Makeup Remover Pads (12 Pack)", "desc": "Soft reusable pads for gentle cleansing and makeup removal.", "cost": (180, 450)},
+    ],
+    "fitness": [
+        {"base": "Resistance Bands Set (5 Levels)", "desc": "Workout bands set for home gym training.", "cost": (450, 950)},
+        {"base": "Adjustable Jump Rope", "desc": "Smooth jump rope for cardio workouts at home.", "cost": (250, 600)},
+    ],
+    "summer": [
+        {"base": "Cooling Towel (Sports)", "desc": "Instant cooling towel for summer heat and workouts.", "cost": (180, 450)},
+        {"base": "Waterproof Phone Pouch", "desc": "Protect your phone at beach, rain, and travel.", "cost": (200, 520)},
+        {"base": "UV Protection Sunglasses", "desc": "Stylish UV sunglasses for daily outdoor use.", "cost": (250, 650)},
     ],
     "general": [
-        {
-            "title": "LED Motion Sensor Night Light (2 Pack)",
-            "description": "Automatic night light for hallway, closet and stairs.",
-            "suggested_cost": 5.5,
-        },
-        {
-            "title": "Portable Mini Blender Bottle",
-            "description": "Compact mixer bottle for smoothies and protein shakes.",
-            "suggested_cost": 8.0,
-        },
+        {"base": "Portable Mini Blender Bottle", "desc": "Compact mixer bottle for smoothies and protein shakes.", "cost": (350, 850)},
+        {"base": "Anti-Slip Drawer Liner", "desc": "Non-adhesive liner to keep items in place.", "cost": (220, 520)},
     ],
 }
 
+ADJ = ["Premium", "Pro", "Ultra", "Smart", "Compact", "Portable", "Modern", "Heavy-Duty"]
+BENEFITS = [
+    "High demand + easy to sell",
+    "Gift-friendly product",
+    "Lightweight and easy to ship",
+    "Great for COD customers",
+    "Strong repeat-purchase potential",
+]
 
-def _pick_fallback(niche: str) -> Dict[str, Any]:
-    niche = (niche or "general").strip().lower()
-    if niche not in FALLBACK_CATALOG:
-        niche = "general"
 
-    item = random.choice(FALLBACK_CATALOG[niche])
+def _norm_niche(niche: str) -> str:
+    s = (niche or "general").strip().lower()
+    s = s.replace("&", "and")
+    s = re.sub(r"\s+", " ", s)
+    mapping = {
+        "tech": "electronics",
+        "gadgets": "electronics",
+        "decor": "home decor",
+        "home decoration": "home decor",
+        "sofa": "home decor",
+        "kitchenware": "kitchen",
+        "gym": "fitness",
+        "workout": "fitness",
+    }
+    return mapping.get(s, s)
 
+
+def _recent_titles(limit: int = 80) -> List[str]:
+    try:
+        with Session(engine) as session:
+            rows = session.exec(
+                select(ProductDraft.title).order_by(ProductDraft.created_at.desc()).limit(limit)
+            ).all()
+            return [r for r in rows if r]
+    except Exception:
+        return []
+
+
+def _pick_unique(niche_key: str) -> Dict[str, Any]:
+    niche_key = _norm_niche(niche_key)
+    if niche_key not in CATALOG:
+        niche_key = "general"
+
+    recent = set(t.lower().strip() for t in _recent_titles(80))
+    pool = CATALOG[niche_key]
+
+    for _ in range(40):
+        item = random.choice(pool)
+        base = item["base"].strip()
+
+        title = base
+        if random.random() < 0.55:
+            title = f"{random.choice(ADJ)} {base}"
+
+        if title.lower() in recent:
+            continue
+
+        lo, hi = item["cost"]
+        cost = float(random.randint(int(lo), int(hi)))
+
+        return {
+            "title": title,
+            "description": item["desc"].strip(),
+            "suggested_cost": cost,
+            "niche_key": niche_key,
+            "signals": random.sample(BENEFITS, k=3),
+        }
+
+    # last fallback
+    item = random.choice(pool)
+    lo, hi = item["cost"]
     return {
-        "ok": True,
-        "chosen_niche": niche,
-        "sources_used": ["fallback_catalog"],
-        "top_pick": {
-            "title": item["title"],
-            "description": item["description"],
-            "suggested_cost": item["suggested_cost"],
-            "source": "fallback_catalog",
-            "confirmed": False,
-        },
+        "title": f"{random.choice(ADJ)} {item['base']}",
+        "description": item["desc"].strip(),
+        "suggested_cost": float(random.randint(int(lo), int(hi))),
+        "niche_key": niche_key,
+        "signals": random.sample(BENEFITS, k=3),
     }
 
 
-# ===============================
-#  MAIN MULTI-SOURCE FUNCTION
-# ===============================
-
 def find_winning_product_multisource(niche: str = "general") -> Dict[str, Any]:
-    """
-    This version NEVER fails.
-    It always returns a valid product.
-    """
-
-    niche = (niche or "general").strip()
-
-    # If in future you re-add Google/eBay logic,
-    # it can go here — but must NEVER hard fail.
-
-    return _pick_fallback(niche)
+    top = _pick_unique(niche)
+    return {
+        "ok": True,
+        "chosen_niche": top["niche_key"],
+        "sources_used": ["internal_catalog"],
+        "top_pick": {
+            "title": top["title"],
+            "description": top["description"],
+            "suggested_cost": top["suggested_cost"],
+            "source": "internal_catalog",
+            "confirmed": False,
+        },
+        "market_signals": top.get("signals", []),
+    }
 
 
 def find_winning_product_multisource_for_many(niches: List[str]) -> Dict[str, Any]:
-    niches = [n.strip() for n in (niches or []) if n and n.strip()]
+    niches = [x.strip() for x in (niches or []) if x and x.strip()]
     if not niches:
         return find_winning_product_multisource("general")
-
-    return find_winning_product_multisource(niches[0])
+    return find_winning_product_multisource(random.choice(niches))
