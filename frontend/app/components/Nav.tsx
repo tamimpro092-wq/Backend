@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 
 const items = [
   { href: "/", label: "Dashboard", hint: "Control deck", accent: "from-cyan-400/40 to-violet-400/15" },
-  { href: "/jarvis", label: "Jarvis", hint: "Command center", accent: "from-violet-400/40 to-pink-400/15" },
+  { href: "/jarvis", label: "Mira", hint: "Command center", accent: "from-violet-400/40 to-pink-400/15" },
   { href: "/shopify", label: "Shopify", hint: "Products", accent: "from-lime-400/35 to-cyan-400/12" },
 
   // ✅ Facebook opens external URL
