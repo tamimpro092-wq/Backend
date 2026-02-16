@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import List
+
 from ..schemas import ToolCall
 
 
@@ -11,35 +12,30 @@ def _norm(text: str) -> str:
 
 _STOP = {
     "a","an","the","my","in","on","to","for","of","with","and","please",
-    "shopify","store","shop","add","create","make","publish","post","put",
-    "product","item","goods","selling","sell","winning","wining","best","top","hot","viral","trending",
+    "shopify","store","shop",
+    "product","item","goods","sku",
+    "add","create","make","publish","post","put","launch","upload",
+    "winning","wining","best","top","hot","viral","trending","new","latest","good","nice",
 }
 
-# words that mean "add product"
-_ADD_HINTS = (
-    "add", "create", "make", "publish", "post", "put", "launch", "upload"
-)
 
-_PRODUCT_HINTS = (
-    "product", "item", "goods", "sku"
-)
-
-_STORE_HINTS = (
-    "shopify", "store", "shop"
-)
+_ADD_HINTS = ("add", "create", "make", "publish", "post", "put", "launch", "upload")
+_PRODUCT_HINTS = ("product", "item", "goods", "sku")
 
 
 def _extract_niche(raw: str) -> str | None:
-    s = _norm(raw).lower()
+    s = _norm(raw)
 
     # explicit niche=...
-    m = re.search(r"\bniche\s*[:=]\s*(\"[^\"]+\"|'[^']+'|[^,;\n]+)", raw, re.I)
+    m = re.search(r"\bniche\s*[:=]\s*(\"[^\"]+\"|'[^']+'|[^,;\n]+)", s, re.I)
     if m:
         v = m.group(1).strip().strip('"').strip("'").strip()
         return v or None
 
-    # phrases like: "for summer", "for electronics", "for home decor"
-    m2 = re.search(r"\bfor\s+([a-z0-9 &\-]+)", s)
+    low = s.lower()
+
+    # "for summer", "for electronics", "for home decor"
+    m2 = re.search(r"\bfor\s+([a-z0-9 &\-\_]+)", low)
     if m2:
         cand = m2.group(1)
         words = [w for w in re.findall(r"[a-z0-9]+", cand) if w and w not in _STOP]
@@ -47,7 +43,7 @@ def _extract_niche(raw: str) -> str | None:
         return niche or None
 
     # words between add/create and product/item
-    m3 = re.search(r"\b(?:add|create|make|publish|post|put)\b(.*?)(?:\bproduct\b|\bitem\b|\bgoods\b|\bsku\b)", s)
+    m3 = re.search(r"\b(?:add|create|make|publish|post|put|launch|upload)\b(.*?)(?:\bproduct\b|\bitem\b|\bgoods\b|\bsku\b)", low)
     if m3:
         cand = m3.group(1)
         words = [w for w in re.findall(r"[a-z0-9]+", cand) if w and w not in _STOP]
@@ -65,19 +61,19 @@ def plan(command_text: str) -> List[ToolCall]:
     if any(k in t for k in ["show me system status", "system status", "status summary", "health"]):
         return [ToolCall(name="status.summary", args={})]
 
-    # inbox
+    # triage
     if "triage inbox" in t or ("triage" in t and "inbox" in t):
         return [ToolCall(name="content.triage_inbox", args={"limit": 50})]
 
-    # ✅ MAIN RULE: any "add product" intent -> autopilot
+    # ✅ MAIN RULE (your requirement):
+    # ANY command that looks like "add/create ... product/item/sku" -> Shopify autopilot
     looks_like_add_product = (
-        any(h in t for h in _ADD_HINTS)
-        and any(p in t for p in _PRODUCT_HINTS)
-        and any(s in t for s in _STORE_HINTS)
-    ) or ("wining product" in t or "winning product" in t)
+        any(h in t for h in _ADD_HINTS) and any(p in t for p in _PRODUCT_HINTS)
+    ) or ("winning product" in t or "wining product" in t)
 
     if looks_like_add_product:
         args = {}
+
         niche = _extract_niche(raw)
         if niche:
             args["niche"] = niche
