@@ -3,8 +3,7 @@ from __future__ import annotations
 import base64
 import math
 import re
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -51,6 +50,12 @@ _QUERY_TEMPLATES = [
 
 
 def google_cse_search(query: str, num: int = 10) -> Dict[str, Any]:
+    """
+    Google Programmable Search / Custom Search JSON API.
+    Requires:
+      GOOGLE_CSE_API_KEY
+      GOOGLE_CSE_CX
+    """
     if not settings.GOOGLE_CSE_API_KEY or not settings.GOOGLE_CSE_CX:
         return {"ok": False, "error": "missing_google_cse_env"}
 
@@ -66,7 +71,12 @@ def google_cse_search(query: str, num: int = 10) -> Dict[str, Any]:
         with httpx.Client(timeout=20.0) as client:
             r = client.get(url, params=params)
             if r.status_code >= 400:
-                return {"ok": False, "error": "google_cse_http_error", "status_code": r.status_code, "body": r.text}
+                return {
+                    "ok": False,
+                    "error": "google_cse_http_error",
+                    "status_code": r.status_code,
+                    "body": r.text,
+                }
             return {"ok": True, "data": r.json()}
     except Exception as e:
         return {"ok": False, "error": "exception", "message": str(e)}
@@ -124,7 +134,7 @@ def google_candidates(niche: str, max_candidates: int = 8) -> Dict[str, Any]:
     all_items.sort(key=lambda x: x["score"], reverse=True)
     top = all_items[:max_candidates]
 
-    # Turn results into “productish concepts”
+    # Convert into “product concepts”
     concepts: List[Dict[str, Any]] = []
     for it in top:
         raw_title = it["title"]
@@ -132,12 +142,14 @@ def google_candidates(niche: str, max_candidates: int = 8) -> Dict[str, Any]:
         concept = re.sub(r"(\|\s*.+$)", "", concept).strip()
         if len(concept) < 8:
             continue
-        concepts.append({
-            "concept": concept,
-            "score": float(it["score"]),
-            "evidence": it,
-            "tokens": _tokenize(concept),
-        })
+        concepts.append(
+            {
+                "concept": concept,
+                "score": float(it["score"]),
+                "evidence": it,
+                "tokens": _tokenize(concept),
+            }
+        )
 
     if not concepts:
         return {"ok": False, "error": "no_google_concepts", "debug": debug, "top": top}
@@ -151,8 +163,10 @@ def google_candidates(niche: str, max_candidates: int = 8) -> Dict[str, Any]:
 # -----------------------
 def _ebay_app_token() -> Dict[str, Any]:
     """
-    Uses client-credentials flow to obtain an application token.
-    eBay REST APIs require OAuth 2.0 access tokens. :contentReference[oaicite:4]{index=4}
+    Client-credentials to get an application token for eBay REST APIs.
+    Requires:
+      EBAY_CLIENT_ID
+      EBAY_CLIENT_SECRET
     """
     cid = settings.EBAY_CLIENT_ID or ""
     csec = settings.EBAY_CLIENT_SECRET or ""
@@ -167,7 +181,6 @@ def _ebay_app_token() -> Dict[str, Any]:
     }
     data = {
         "grant_type": "client_credentials",
-        # Browse scope for search
         "scope": "https://api.ebay.com/oauth/api_scope",
     }
 
@@ -175,7 +188,12 @@ def _ebay_app_token() -> Dict[str, Any]:
         with httpx.Client(timeout=20.0) as client:
             r = client.post(token_url, headers=headers, data=data)
             if r.status_code >= 400:
-                return {"ok": False, "error": "ebay_token_http_error", "status_code": r.status_code, "body": r.text}
+                return {
+                    "ok": False,
+                    "error": "ebay_token_http_error",
+                    "status_code": r.status_code,
+                    "body": r.text,
+                }
             js = r.json()
             token = js.get("access_token")
             if not token:
@@ -203,19 +221,18 @@ def ebay_search(query: str, limit: int = 20) -> Dict[str, Any]:
         with httpx.Client(timeout=20.0) as client:
             r = client.get(url, headers=headers, params=params)
             if r.status_code >= 400:
-                return {"ok": False, "error": "ebay_search_http_error", "status_code": r.status_code, "body": r.text}
+                return {
+                    "ok": False,
+                    "error": "ebay_search_http_error",
+                    "status_code": r.status_code,
+                    "body": r.text,
+                }
             return {"ok": True, "data": r.json(), "marketplace": marketplace}
     except Exception as e:
         return {"ok": False, "error": "exception", "message": str(e)}
 
 
 def ebay_signal_for_concept(concept: str) -> Dict[str, Any]:
-    """
-    Demand proxy:
-    - total results (if present)
-    - median price of returned items
-    - count of items pulled
-    """
     q = (concept or "").strip()
     if not q:
         return {"ok": False, "error": "empty_concept"}
@@ -225,7 +242,7 @@ def ebay_signal_for_concept(concept: str) -> Dict[str, Any]:
         return res
 
     data = res["data"] or {}
-    total = data.get("total")  # may be present
+    total = data.get("total")
     items = data.get("itemSummaries") or []
 
     prices: List[float] = []
@@ -251,21 +268,12 @@ def ebay_signal_for_concept(concept: str) -> Dict[str, Any]:
 # -----------------------
 # Multi-source confirmation
 # -----------------------
-def _jaccard(a: List[str], b: List[str]) -> float:
-    sa, sb = set(a), set(b)
-    if not sa or not sb:
-        return 0.0
-    return len(sa & sb) / float(len(sa | sb))
-
-
 def find_winning_product_multisource(niche: str) -> Dict[str, Any]:
     """
     Multi-source confirmation:
-    - Generate Google candidates (live SERP best-seller/trending)
-    - For top concepts, query eBay for demand proxy
-    - Select the concept with highest combined score, requiring minimum eBay evidence
-
-    If Google is unavailable (quota/env), we return error (because you said: "best, no option").
+    - Google CSE candidates for best-seller / trending
+    - eBay browse search as demand proxy
+    - pick highest combined score, prefer confirmed
     """
     niche_clean = (niche or "general").strip()
 
@@ -274,52 +282,50 @@ def find_winning_product_multisource(niche: str) -> Dict[str, Any]:
         return {"ok": False, "error": "google_unavailable_or_no_results", "details": g}
 
     concepts = g["concepts"]
-
     scored: List[Dict[str, Any]] = []
-    for c in concepts[:6]:  # keep API usage small
+
+    # Keep API usage small
+    for c in concepts[:6]:
         concept = c["concept"]
         ebay_sig = ebay_signal_for_concept(concept)
 
-        # eBay evidence scoring
         ebay_score = 0.0
+        confirmed = False
+
         if ebay_sig.get("ok"):
             items_count = int(ebay_sig.get("items_count") or 0)
             total = ebay_sig.get("total")
             med_price = ebay_sig.get("median_price")
 
-            # demand proxy: more items = more market activity
             ebay_score += min(4.0, items_count / 8.0)
 
-            # if eBay returns "total", use it gently
             if isinstance(total, int):
                 ebay_score += min(3.0, math.log10(max(1, total)) / 2.0)
 
-            # if there is a median price, commerce relevance
-            if med_price and med_price > 0:
+            if med_price and isinstance(med_price, (int, float)) and med_price > 0:
                 ebay_score += 1.0
 
-        # confirmation gate: must have some evidence
-        confirmed = bool(ebay_sig.get("ok")) and (int(ebay_sig.get("items_count") or 0) >= 8)
+            # confirmation gate
+            confirmed = items_count >= 8
 
         combined = float(c["score"]) + float(ebay_score)
-        scored.append({
-            "concept": concept,
-            "google_score": float(c["score"]),
-            "ebay_score": float(ebay_score),
-            "combined_score": combined,
-            "confirmed": confirmed,
-            "google_evidence": c["evidence"],
-            "ebay_signal": ebay_sig,
-            "tokens": c["tokens"],
-        })
+        scored.append(
+            {
+                "concept": concept,
+                "google_score": float(c["score"]),
+                "ebay_score": float(ebay_score),
+                "combined_score": combined,
+                "confirmed": confirmed,
+                "google_evidence": c["evidence"],
+                "ebay_signal": ebay_sig,
+            }
+        )
 
-    # Prefer confirmed, highest combined
-    confirmed = [x for x in scored if x["confirmed"]]
-    pool = confirmed if confirmed else scored
+    confirmed_list = [x for x in scored if x["confirmed"]]
+    pool = confirmed_list if confirmed_list else scored
     pool.sort(key=lambda x: x["combined_score"], reverse=True)
     best = pool[0]
 
-    # Price anchor / cost heuristic from median price (if available)
     med_price = (best.get("ebay_signal") or {}).get("median_price")
     suggested_cost = 10.0
     if isinstance(med_price, (int, float)) and med_price > 0:
@@ -342,3 +348,56 @@ def find_winning_product_multisource(niche: str) -> Dict[str, Any]:
         "candidates": pool[:5],
         "google_debug": g.get("debug"),
     }
+
+
+def find_winning_product_multisource_for_many(niches: List[str]) -> Dict[str, Any]:
+    """
+    Multi-niche:
+    Try each niche with multi-source confirmation, return the single best overall.
+    Prefer confirmed, then highest combined score.
+    """
+    cleaned = [(n or "").strip() for n in (niches or []) if (n or "").strip()]
+    if not cleaned:
+        return {"ok": False, "error": "no_niches_provided"}
+
+    all_results: List[Dict[str, Any]] = []
+    errors: List[Dict[str, Any]] = []
+
+    for niche in cleaned[:15]:
+        r = find_winning_product_multisource(niche=niche)
+        if not r.get("ok"):
+            errors.append({"niche": niche, "error": r.get("error"), "details": r.get("details")})
+            continue
+
+        candidates = r.get("candidates") or []
+        top_score = None
+        if candidates and isinstance(candidates[0], dict):
+            top_score = candidates[0].get("combined_score")
+
+        all_results.append(
+            {
+                "niche": niche,
+                "result": r,
+                "top_combined_score": float(top_score) if isinstance(top_score, (int, float)) else None,
+                "confirmed": bool((r.get("top_pick") or {}).get("confirmed")),
+            }
+        )
+
+    if not all_results:
+        return {"ok": False, "error": "all_niches_failed", "errors": errors}
+
+    confirmed = [x for x in all_results if x["confirmed"]]
+    pool = confirmed if confirmed else all_results
+
+    def _key(x: Dict[str, Any]) -> float:
+        s = x.get("top_combined_score")
+        return float(s) if isinstance(s, (int, float)) else -1e9
+
+    pool.sort(key=_key, reverse=True)
+    best = pool[0]
+
+    out = best["result"]
+    out["chosen_niche"] = best["niche"]
+    out["multi_niche_tested"] = cleaned
+    out["multi_niche_errors"] = errors
+    return out
