@@ -38,7 +38,7 @@ def _make_price_bd(cost_bd: float) -> Tuple[float, float]:
 
 
 def _slugify(s: str) -> str:
-    s = s.lower().strip()
+    s = (s or "").lower().strip()
     s = re.sub(r"[^a-z0-9]+", "-", s)
     s = re.sub(r"-+", "-", s).strip("-")
     if not s:
@@ -47,33 +47,53 @@ def _slugify(s: str) -> str:
 
 
 def _clean_product_type(niche: str) -> str:
+    """
+    Normalizes niche-like text. Not final safety.
+    """
     s = (niche or "general").strip().lower()
     s = re.sub(r"\b(in my store|in store|my store|shopify|store|shop)\b", "", s, flags=re.I)
     s = re.sub(r"[^a-z0-9 &\-\_]+", " ", s, flags=re.I)
     s = re.sub(r"\s+", " ", s).strip()
     if not s:
         s = "general"
-    # keep short & safe
-    return s[:60].rstrip()
+    return s[:80].rstrip()
+
+
+def _safe_product_type(value: str | None) -> str:
+    """
+    ✅ FINAL GUARANTEE:
+    Shopify product_type/custom_product_type max 255.
+    We enforce a strong small limit so it can NEVER fail.
+    """
+    s = (value or "general").strip().lower()
+
+    # Remove common command noise
+    s = re.sub(r"\b(in my store|in store|my store|shopify|store|shop)\b", "", s, flags=re.I)
+    s = re.sub(r"[^a-z0-9 &\-\_]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+
+    if not s:
+        s = "general"
+
+    # ✅ Keep very short & category-like (safe for Shopify + clean UI)
+    if len(s) > 50:
+        s = s[:50].rstrip()
+
+    return s
 
 
 def _seo_title_bd(base_title: str, niche: str) -> str:
     """
     60–70 chars target: keyword + benefit + COD BD
     """
-    base = base_title.strip()
-    niche_clean = _clean_product_type(niche).title()
+    base = (base_title or "Product").strip()
+    niche_clean = _safe_product_type(niche).title()
 
-    # prefer: "<Product> – Best Price | COD BD"
     t = f"{base} – Best Price | Cash on Delivery BD"
-
-    # cap to 70 safely
     if len(t) > 70:
         t = t[:70].rstrip()
-        # remove trailing punctuation
         t = re.sub(r"[\-|–|\|]\s*$", "", t).strip()
 
-    # ensure not too tiny
     if len(t) < 45:
         t = f"{base} – {niche_clean} | COD BD"
         if len(t) > 70:
@@ -83,7 +103,7 @@ def _seo_title_bd(base_title: str, niche: str) -> str:
 
 
 def _keywords(title: str, niche: str) -> List[str]:
-    words = re.findall(r"[a-z0-9]+", title.lower())
+    words = re.findall(r"[a-z0-9]+", (title or "").lower())
     words = [w for w in words if len(w) > 2]
     niche_words = re.findall(r"[a-z0-9]+", (niche or "general").lower())
     niche_words = [w for w in niche_words if len(w) > 2]
@@ -107,21 +127,17 @@ def _variants(title: str, niche: str, price: float, compare_at: float, qty: int)
     """
     Safe variant logic:
     - Sofa cover => Size + Color variants (high conversion)
-    - Otherwise => single variant (no confusion / no errors)
+    - Otherwise => single variant (stable)
     """
-    sku_base = re.sub(r"[^A-Za-z0-9]+", "-", title.upper()).strip("-")[:18]
+    sku_base = re.sub(r"[^A-Za-z0-9]+", "-", (title or "SKU").upper()).strip("-")[:18]
 
     if _is_sofa_cover(title, niche):
         sizes = ["1 Seater", "2 Seater", "3 Seater", "L Shape"]
-        colors = ["Beige", "Brown", "Grey", "Blue"]
+        colors = ["Beige", "Grey"]  # keep simple and stable
 
-        # create a limited set to keep Shopify clean (8 variants)
-        pairs = []
-        for sz in sizes[:4]:
-            pairs.append((sz, "Beige"))
-            pairs.append((sz, "Grey"))
-
+        pairs = [(sz, col) for sz in sizes for col in colors]  # 8 variants
         per_qty = max(5, int(qty / max(1, len(pairs))))
+
         variants = []
         for i, (sz, col) in enumerate(pairs):
             variants.append(
@@ -139,7 +155,6 @@ def _variants(title: str, niche: str, price: float, compare_at: float, qty: int)
             )
         return variants
 
-    # default single variant (stable)
     return [
         {
             "price": f"{price:.2f}",
@@ -160,20 +175,19 @@ def _seo_description_bd(
     keys: List[str],
     market_signals: List[str],
 ) -> str:
-    # BD conversion style + your exact structure + trust + FAQ
     features = [
         "Premium quality material",
-        "Durable & long lasting",
-        "Easy to use / install",
+        "Washable & durable",
+        "Easy fitting / easy use",
         "Perfect for daily use",
         "Cash on Delivery available",
     ]
     feats_html = "".join([f"<li>{x}</li>" for x in features])
 
     who_for = [
-        f"Perfect for {niche.title()} buyers",
+        f"Perfect for {niche.title()} customers",
         "Great for gifting",
-        "Good for home & office use",
+        "Suitable for home & office use",
     ]
     who_html = "".join([f"<li>{x}</li>" for x in who_for])
 
@@ -183,9 +197,9 @@ def _seo_description_bd(
     handle = _slugify(title)
 
     faq = [
+        ("Is it washable?", "Yes, it’s easy to wash and made for daily use."),
         ("Is Cash on Delivery available?", "Yes, Cash on Delivery is available across Bangladesh."),
-        ("Is it durable?", "Yes, it’s made for daily use with strong build quality."),
-        ("How do I order?", "Place your order from the website. You can also order via WhatsApp if you use that option."),
+        ("How do I order?", "Place your order from the website. WhatsApp option can also be added."),
         ("Delivery time?", "Usually 1–3 days depending on location."),
     ]
     faq_html = "".join([f"<details><summary><strong>{q}</strong></summary><p>{a}</p></details>" for q, a in faq])
@@ -193,7 +207,7 @@ def _seo_description_bd(
     trust = [
         "✔ Cash on Delivery (BD)",
         "✔ Easy Return Policy",
-        "✔ Customer Support",
+        "✔ Custom Support via WhatsApp",
         "✔ Quality Check Before Delivery",
     ]
     trust_html = "<br/>".join(trust)
@@ -201,7 +215,7 @@ def _seo_description_bd(
     return f"""
 <h2>{title}</h2>
 
-<p><strong>Hook:</strong> {short_desc} Upgrade your lifestyle in minutes!</p>
+<p><strong>Hook:</strong> {short_desc} Upgrade your home in minutes!</p>
 
 <h3>✅ Features</h3>
 <ul>{feats_html}</ul>
@@ -212,7 +226,7 @@ def _seo_description_bd(
 <h3>✅ Market analysis (autopilot)</h3>
 <ul>
 <li>High buyer intent in <strong>{niche.title()}</strong> niche</li>
-<li>Search-friendly keywords: <strong>{kw_line}</strong></li>
+<li>Search keywords: <strong>{kw_line}</strong></li>
 {signals_html}
 </ul>
 
@@ -266,42 +280,47 @@ def add_product_full_auto(
     niche: str | None = None,
     inventory_qty: int | None = None,
 ) -> Dict[str, Any]:
-    raw_niche = (niche or settings.STORE_NICHE or "general").strip()
+    # IMPORTANT: raw niche might accidentally include the whole command text
+    raw_niche = (niche or getattr(settings, "STORE_NICHE", "") or "general").strip()
     niche_list = [x.strip() for x in raw_niche.split(",") if x.strip()]
     qty = int(inventory_qty or getattr(settings, "DEFAULT_INVENTORY_QTY", 100) or 100)
 
-    # 1) Research (catalog-based, never hard-fails)
+    # 1) Research (never hard-fails due to your multisource/catalog)
     if len(niche_list) <= 1:
-        niche_final = _clean_product_type(niche_list[0] if niche_list else "general")
+        niche_guess = niche_list[0] if niche_list else "general"
+        niche_final = _clean_product_type(niche_guess)
         r = find_winning_product_multisource(niche=niche_final)
     else:
         r = find_winning_product_multisource_for_many(niches=niche_list)
-        niche_final = _clean_product_type(r.get("chosen_niche") or (niche_list[0] if niche_list else "general"))
+        niche_final = _clean_product_type(r.get("chosen_niche") or niche_list[0])
 
     if not r.get("ok"):
         return {"ok": False, "error": "live_research_failed", "details": r}
 
+    # ✅ FINAL SAFE product_type for Shopify (prevents 422 forever)
+    product_type = _safe_product_type(niche_final)
+
     top = r["top_pick"]
-    base_title = top["title"]
-    short_desc = top["description"]
+    base_title = top.get("title") or "Product"
+    short_desc = top.get("description") or "High-demand product for everyday use."
     cost_bd = float(top.get("suggested_cost") or 500.0)
 
     # 2) Pricing
     price, compare_at = _make_price_bd(cost_bd)
 
     # 3) SEO title/keywords/tags/description
-    seo_title = _seo_title_bd(base_title, niche_final)
-    keys = _keywords(seo_title, niche_final)
+    seo_title = _seo_title_bd(base_title, product_type)
+    keys = _keywords(seo_title, product_type)
     tags = _tags_from_keywords(keys)
     market_signals = (r.get("market_signals") or []) if isinstance(r, dict) else []
-    body_html = _seo_description_bd(seo_title, niche_final, short_desc, keys, market_signals)
+    body_html = _seo_description_bd(seo_title, product_type, short_desc, keys, market_signals)
 
     # 4) Images (5–7)
-    urls = _image_urls(seo_title, niche_final)
+    urls = _image_urls(seo_title, product_type)
     image_url = urls[0] if urls else None
 
     # 5) Variants
-    variants = _variants(seo_title, niche_final, price, compare_at, qty)
+    variants = _variants(seo_title, product_type, price, compare_at, qty)
 
     # 6) DRY_RUN / missing creds
     if bool(settings.DRY_RUN) or not (settings.SHOPIFY_SHOP and settings.SHOPIFY_ACCESS_TOKEN):
@@ -314,7 +333,7 @@ def add_product_full_auto(
                 status="simulated_published",
                 external_id="",
                 meta={
-                    "niche": niche_final,
+                    "niche": product_type,
                     "cost": cost_bd,
                     "compare_at": compare_at,
                     "tags": tags,
@@ -336,7 +355,7 @@ def add_product_full_auto(
             "compare_at": compare_at,
             "image_url": image_url,
             "image_urls": urls,
-            "chosen_niche": niche_final,
+            "chosen_niche": product_type,
             "note": "DRY_RUN or missing Shopify creds: product not created in Shopify.",
         }
 
@@ -348,7 +367,7 @@ def add_product_full_auto(
             "title": seo_title,
             "body_html": body_html,
             "vendor": settings.BRAND_NAME,
-            "product_type": niche_final,  # cleaned + short (prevents 422)
+            "product_type": product_type,  # ✅ SAFE VALUE
             "tags": tags,
             "handle": _slugify(seo_title),
             "status": "active",
@@ -379,7 +398,7 @@ def add_product_full_auto(
                 status="published",
                 external_id=str(shopify_id) if shopify_id else "",
                 meta={
-                    "niche": niche_final,
+                    "niche": product_type,
                     "cost": cost_bd,
                     "compare_at": compare_at,
                     "tags": tags,
@@ -407,7 +426,7 @@ def add_product_full_auto(
             "compare_at": compare_at,
             "image_url": image_url,
             "image_urls": urls,
-            "chosen_niche": niche_final,
+            "chosen_niche": product_type,
         }
 
     except Exception as e:
