@@ -38,6 +38,11 @@ def plan(command_text: str) -> List[ToolCall]:
         calls.append(ToolCall(name="content.triage_inbox", args={"limit": 50}))
         return calls
 
+    # ✅ NEW: Full Shopify autopilot (no approval)
+    if any(k in t for k in ["add a product", "add product", "add a product in my store", "add product in my store", "create a product in my store"]):
+        calls.append(ToolCall(name="shopify.autopilot_add_product", args={}))
+        return calls
+
     m = re.search(r"\bpublish product\s+(\d+)\b", t)
     if m:
         calls.append(ToolCall(name="shopify.publish_product", args={"product_id": int(m.group(1))}))
@@ -53,24 +58,20 @@ def plan(command_text: str) -> List[ToolCall]:
         calls.append(ToolCall(name="research.analyze_pricing", args={"mode": "latest_draft"}))
         calls.append(ToolCall(name="content.generate_product_copy", args={"mode": "latest_draft"}))
         return calls
-    
+
     m = re.search(r"\bgenerate\s+(\d+)\s+posts\b", t)
     if m:
         n = int(m.group(1))
         calls.append(ToolCall(name="content.generate_posts_batch", args={"channel": "facebook", "count": n}))
-        # publish one simple post now (batch publishing needs loop support)
         calls.append(ToolCall(name="facebook.create_post", args={"text_from": f"batch:{n}"}))
         return calls
-
 
     m = re.search(r"create a facebook post about product\s+(.+)$", raw, re.I)
     if m:
         product = m.group(1).strip()
         calls.append(ToolCall(name="content.generate_post", args={"channel": "facebook", "product": product}))
-        # pass generated text into create_post using executor chaining? (simple version uses text_from only)
         calls.append(ToolCall(name="facebook.create_post", args={"text_from": f"product:{product}"}))
         return calls
-
 
     m = re.search(r"reply to comment\s+(\d+)\s+with\s+(.+)$", raw, re.I)
     if m:
@@ -92,11 +93,9 @@ def plan(command_text: str) -> List[ToolCall]:
     if m:
         n = int(m.group(1))
         calls.append(ToolCall(name="content.generate_posts_batch", args={"channel": "facebook", "count": n}))
-        # queue action (approval gating handled at tool/policy level)
         calls.append(ToolCall(name="facebook.queue_posts_for_approval", args={"count": n}))
         return calls
 
-    # Default fallback: triage + summary
     calls.append(ToolCall(name="content.triage_inbox", args={"limit": 20}))
     calls.append(ToolCall(name="status.summary", args={}))
     return calls
