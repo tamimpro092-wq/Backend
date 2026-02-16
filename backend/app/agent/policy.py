@@ -24,8 +24,7 @@ RISKY_TOOLS = (
     "local.exec",
 )
 
-# ✅ NEW: Tools that are safe enough to run without approvals
-# NOTE: This is exactly what you want for "one-command Shopify autopilot".
+# ✅ Allow Shopify autopilot to run (no approvals)
 ALWAYS_ALLOWED = (
     "shopify.autopilot_add_product",
 )
@@ -36,6 +35,7 @@ SAFE_PREFIXES = (
     "content.",
     "supplier.",
     "call_fallback.",
+    "facebook.queue_posts_forưA
     "facebook.queue_posts_for_approval",
 )
 
@@ -43,9 +43,8 @@ SAFE_PREFIXES = (
 def evaluate(call: ToolCall, context: Dict[str, Any] | None = None) -> PolicyDecision:
     name = call.name or ""
 
-    # ✅ Allow autopilot tool
+    # ✅ allow this tool to execute
     if name in ALWAYS_ALLOWED:
-        # still show as medium/high risk but allow execution
         return PolicyDecision(action="allowed", risk="high", reason="Shopify autopilot allowed")
 
     if name.startswith(SAFE_PREFIXES):
