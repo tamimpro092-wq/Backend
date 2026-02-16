@@ -1,47 +1,75 @@
 from __future__ import annotations
 
-import os
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    # Core
-    BRAND_NAME: str = os.getenv("BRAND_NAME", "MIRA")
-    DRY_RUN: bool = os.getenv("DRY_RUN", "false").lower() == "true"
+    # Load from .env (optional) + still allow docker env vars
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # DB / Redis
-    DB_PATH: str = os.getenv("DB_PATH", "/tmp/app.db")
-    REDIS_URL: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
+    # General
+    BRAND_NAME: str = "Acme"
+    DRY_RUN: int = 1
+    LOG_LEVEL: str = "INFO"
 
-    # Local actions (disabled by default for safety)
-    LOCAL_ACTIONS_ENABLED: bool = os.getenv("LOCAL_ACTIONS_ENABLED", "false").lower() == "true"
+    # ✅ Required by your db.py
+    DATABASE_PATH: str = "/data/app.db"
+    WORKSPACE_DIR: str = "/workspace"
 
-    # Shopify
-    SHOPIFY_SHOP: str = os.getenv("SHOPIFY_SHOP", "")
-    SHOPIFY_ACCESS_TOKEN: str = os.getenv("SHOPIFY_ACCESS_TOKEN", "")
-    SHOPIFY_API_VERSION: str = os.getenv("SHOPIFY_API_VERSION", "2024-10")
+    # Background / queue
+    REDIS_URL: str = "redis://redis:6379/0"
+    CELERY_BROKER_URL: str = "redis://redis:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://redis:6379/0"
 
-    # ✅ Missing in your project (caused crash)
-    STORE_NICHE: str = os.getenv("STORE_NICHE", "general")
-    DEFAULT_INVENTORY_QTY: int = int(os.getenv("DEFAULT_INVENTORY_QTY", "100"))
+    # Schedules
+    NIGHTLY_HOUR: int = 2
+    NIGHTLY_MINUTE: int = 10
+    REPORT_HOUR: int = 9
+    REPORT_MINUTE: int = 0
 
-    # Google CSE (optional)
-    GOOGLE_CSE_API_KEY: str = os.getenv("GOOGLE_CSE_API_KEY", "")
-    GOOGLE_CSE_CX: str = os.getenv("GOOGLE_CSE_CX", "")
-
-    # eBay (optional)
-    EBAY_CLIENT_ID: str = os.getenv("EBAY_CLIENT_ID", "")
-    EBAY_CLIENT_SECRET: str = os.getenv("EBAY_CLIENT_SECRET", "")
-    EBAY_MARKETPLACE_ID: str = os.getenv("EBAY_MARKETPLACE_ID", "EBAY_US")
-
-    # Pexels (optional)
-    PEXELS_API_KEY: str = os.getenv("PEXELS_API_KEY", "")
+    # Local actions
+    LOCAL_ACTIONS_ENABLED: int = 0
 
     # Ollama (optional)
-    OLLAMA_ENABLED: bool = os.getenv("OLLAMA_ENABLED", "false").lower() == "true"
+    OLLAMA_ENABLED: int = 0
+    OLLAMA_BASE_URL: str = "http://ollama:11434"
+    OLLAMA_MODEL: str = "llama3.1"
 
-    class Config:
-        extra = "ignore"
+    # LLM (optional)
+    OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    OPENAI_MODEL: str = "gpt-4o-mini"
+
+    # Shopify
+    SHOPIFY_SHOP: str = ""
+    SHOPIFY_ACCESS_TOKEN: str = ""
+    SHOPIFY_API_VERSION: str = "2026-01"
+
+    # ✅ ADD (so autopilot never crashes)
+    STORE_NICHE: str = "general"
+    DEFAULT_INVENTORY_QTY: int = 100
+
+    # Research / Web signals (optional)
+    GOOGLE_CSE_API_KEY: str = ""
+    GOOGLE_CSE_CX: str = ""
+
+    EBAY_CLIENT_ID: str = ""
+    EBAY_CLIENT_SECRET: str = ""
+    EBAY_MARKETPLACE_ID: str = "EBAY_US"
+
+    PEXELS_API_KEY: str = ""
+    UNSPLASH_ACCESS_KEY: str = ""
+
+    # Facebook
+    FACEBOOK_GRAPH_VERSION: str = "v19.0"
+    FACEBOOK_PAGE_ID: str = ""
+    FACEBOOK_ACCESS_TOKEN: str = ""
+    FACEBOOK_VERIFY_TOKEN: str = "dev-verify-token"
+
+    # WhatsApp
+    WHATSAPP_PHONE_NUMBER_ID: str = ""
+    WHATSAPP_ACCESS_TOKEN: str = ""
+    WHATSAPP_VERIFY_TOKEN: str = "dev-verify-token"
 
 
 settings = Settings()
