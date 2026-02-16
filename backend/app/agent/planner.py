@@ -11,11 +11,11 @@ def _norm(text: str) -> str:
 
 
 _STOP = {
-    "a","an","the","my","in","on","to","for","of","with","and","please",
-    "shopify","store","shop",
-    "product","item","goods","sku",
-    "add","create","make","publish","post","put","launch","upload",
-    "winning","wining","best","top","hot","viral","trending","new","latest","good","nice",
+    "a", "an", "the", "my", "in", "on", "to", "for", "of", "with", "and", "please",
+    "shopify", "store", "shop",
+    "product", "item", "goods", "sku",
+    "add", "create", "make", "publish", "post", "put", "launch", "upload",
+    "winning", "wining", "best", "top", "hot", "viral", "trending", "new", "latest",
 }
 
 
@@ -25,14 +25,13 @@ _PRODUCT_HINTS = ("product", "item", "goods", "sku")
 
 def _extract_niche(raw: str) -> str | None:
     s = _norm(raw)
+    low = s.lower()
 
     # explicit niche=...
     m = re.search(r"\bniche\s*[:=]\s*(\"[^\"]+\"|'[^']+'|[^,;\n]+)", s, re.I)
     if m:
         v = m.group(1).strip().strip('"').strip("'").strip()
         return v or None
-
-    low = s.lower()
 
     # "for summer", "for electronics", "for home decor"
     m2 = re.search(r"\bfor\s+([a-z0-9 &\-\_]+)", low)
@@ -43,7 +42,10 @@ def _extract_niche(raw: str) -> str | None:
         return niche or None
 
     # words between add/create and product/item
-    m3 = re.search(r"\b(?:add|create|make|publish|post|put|launch|upload)\b(.*?)(?:\bproduct\b|\bitem\b|\bgoods\b|\bsku\b)", low)
+    m3 = re.search(
+        r"\b(?:add|create|make|publish|post|put|launch|upload)\b(.*?)(?:\bproduct\b|\bitem\b|\bgoods\b|\bsku\b)",
+        low,
+    )
     if m3:
         cand = m3.group(1)
         words = [w for w in re.findall(r"[a-z0-9]+", cand) if w and w not in _STOP]
@@ -57,16 +59,13 @@ def plan(command_text: str) -> List[ToolCall]:
     raw = _norm(command_text)
     t = raw.lower()
 
-    # status
     if any(k in t for k in ["show me system status", "system status", "status summary", "health"]):
         return [ToolCall(name="status.summary", args={})]
 
-    # triage
     if "triage inbox" in t or ("triage" in t and "inbox" in t):
         return [ToolCall(name="content.triage_inbox", args={"limit": 50})]
 
-    # ✅ MAIN RULE (your requirement):
-    # ANY command that looks like "add/create ... product/item/sku" -> Shopify autopilot
+    # ✅ MAIN RULE: any "add/create/publish + product/item/sku" => Shopify autopilot
     looks_like_add_product = (
         any(h in t for h in _ADD_HINTS) and any(p in t for p in _PRODUCT_HINTS)
     ) or ("winning product" in t or "wining product" in t)
@@ -87,7 +86,6 @@ def plan(command_text: str) -> List[ToolCall]:
 
         return [ToolCall(name="shopify.autopilot_add_product", args=args)]
 
-    # fallback
     return [
         ToolCall(name="content.triage_inbox", args={"limit": 20}),
         ToolCall(name="status.summary", args={}),
