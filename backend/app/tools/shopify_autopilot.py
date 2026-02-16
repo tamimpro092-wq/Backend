@@ -249,18 +249,46 @@ def _seo_description_bd(
 """.strip()
 
 
+def _strip_seo_tail_for_images(title: str) -> str:
+    """
+    ✅ CRITICAL FIX: remove '– Best Price | Cash on Delivery BD' before image search,
+    otherwise Pexels returns random irrelevant results.
+    """
+    s = (title or "").strip()
+
+    # Remove common tail patterns
+    s = re.sub(r"\s*[–\-]\s*best price\s*\|\s*cash on delivery bd\s*$", "", s, flags=re.I)
+    s = re.sub(r"\s*\|\s*cash on delivery bd\s*$", "", s, flags=re.I)
+    s = re.sub(r"\s*\|\s*cod bd\s*$", "", s, flags=re.I)
+
+    # Also remove any long separator tail after '–' if it contains delivery/cod keywords
+    s = re.sub(r"\s*[–\-]\s*.*\b(cod|delivery|bangladesh)\b.*$", "", s, flags=re.I).strip()
+
+    # last tidy
+    s = re.sub(r"\s+", " ", s).strip()
+    return s or (title or "product")
+
+
 def _image_urls(title: str, niche: str) -> List[str]:
     """
     Try to fetch 5–7 image URLs. If Pexels fails, still return at least 1 if possible.
+
+    ✅ UPDATED:
+    - uses clean_title for search
+    - uses multiple relevant queries
+    - avoids duplicates
     """
+    clean_title = _strip_seo_tail_for_images(title)
+    clean_niche = _safe_product_type(niche)
+
     queries = [
-        f"{title} white background product",
-        f"{title} lifestyle use",
-        f"{title} close up detail",
-        f"{niche} product photo",
-        f"{title} packaging product",
-        f"{title} on table",
-        f"{title} in hand product",
+        f"{clean_title} white background product photo",
+        f"{clean_title} product photo",
+        f"{clean_title} lifestyle use photo",
+        f"{clean_title} close up detail photo",
+        f"{clean_title} packaging photo",
+        f"{clean_niche} product photo",
+        f"{clean_title} in hand photo",
     ]
 
     urls: List[str] = []
@@ -285,7 +313,7 @@ def add_product_full_auto(
     niche_list = [x.strip() for x in raw_niche.split(",") if x.strip()]
     qty = int(inventory_qty or getattr(settings, "DEFAULT_INVENTORY_QTY", 100) or 100)
 
-    # 1) Research (never hard-fails due to your multisource/catalog)
+    # 1) Research (catalog-based, avoids repeats via research_multisource.py)
     if len(niche_list) <= 1:
         niche_guess = niche_list[0] if niche_list else "general"
         niche_final = _clean_product_type(niche_guess)
@@ -315,7 +343,7 @@ def add_product_full_auto(
     market_signals = (r.get("market_signals") or []) if isinstance(r, dict) else []
     body_html = _seo_description_bd(seo_title, product_type, short_desc, keys, market_signals)
 
-    # 4) Images (5–7)
+    # 4) Images (5–7) ✅ now using clean_title
     urls = _image_urls(seo_title, product_type)
     image_url = urls[0] if urls else None
 
@@ -382,7 +410,12 @@ def add_product_full_auto(
         with httpx.Client(timeout=45.0) as client:
             resp = client.post(create_url, headers=_shopify_headers(), json=payload)
             if resp.status_code >= 400:
-                return {"ok": False, "error": "shopify_http_error", "status_code": resp.status_code, "body": resp.text}
+                return {
+                    "ok": False,
+                    "error": "shopify_http_error",
+                    "status_code": resp.status_code,
+                    "body": resp.text,
+                }
 
             data = resp.json() or {}
             prod = (data.get("product") or {})
