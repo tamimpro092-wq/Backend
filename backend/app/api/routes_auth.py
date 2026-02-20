@@ -8,7 +8,8 @@ from ..db import get_session
 from ..models import User
 from ..schemas import LoginRequest, LoginResponse, SignupRequest, UserOut
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+# ✅ IMPORTANT: your project uses /api prefix in every router
+router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 def _get_bearer_token(authorization: str | None) -> str | None:
