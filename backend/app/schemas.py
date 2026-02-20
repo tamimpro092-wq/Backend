@@ -51,3 +51,25 @@ class StatusSummary(BaseModel):
     pending_approvals: int
     recent_runs: List[Dict[str, Any]]
     recent_logs: List[Dict[str, Any]]
+
+
+# ✅ added (Auth schemas)
+class SignupRequest(BaseModel):
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+
+class UserOut(BaseModel):
+    id: Optional[int] = None
+    username: str
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
