@@ -71,5 +71,9 @@ class Settings(BaseSettings):
     WHATSAPP_ACCESS_TOKEN: str = ""
     WHATSAPP_VERIFY_TOKEN: str = "dev-verify-token"
 
+    # ✅ added (Auth settings)
+    AUTH_SECRET: str = "dev-secret-change-me"
+    AUTH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+
 
 settings = Settings()
