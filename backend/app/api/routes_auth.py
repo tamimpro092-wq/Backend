@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlmodel import Session, select
 
-from ..auth import create_token, hash_password, verify_password, decode_token
+from ..auth import create_token, decode_token, hash_password, verify_password
 from ..db import get_session
 from ..models import User
 from ..schemas import LoginRequest, LoginResponse, SignupRequest, UserOut
-from ..settings import settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -45,7 +44,7 @@ def login(payload: LoginRequest, session: Session = Depends(get_session)) -> Log
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
-    token = create_token(subject=user.username, expires_minutes=settings.AUTH_TOKEN_EXPIRE_MINUTES)
+    token = create_token(subject=user.username)
     return LoginResponse(access_token=token, token_type="bearer", user=UserOut(id=user.id, username=user.username))
 
 
