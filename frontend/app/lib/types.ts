@@ -54,3 +54,25 @@ export type StatusSummary = {
   recent_runs: any[];
   recent_logs: any[];
 };
+
+// ✅ added (Auth types)
+export type SignupRequest = {
+  username: string;
+  password: string;
+};
+
+export type LoginRequest = {
+  username: string;
+  password: string;
+};
+
+export type UserOut = {
+  id?: number | null;
+  username: string;
+};
+
+export type LoginResponse = {
+  access_token: string;
+  token_type: string;
+  user: UserOut;
+};
