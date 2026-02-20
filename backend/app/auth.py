@@ -21,10 +21,6 @@ def _b64url_decode(data: str) -> bytes:
 
 
 def hash_password(password: str) -> str:
-    """
-    Simple salted hash using HMAC-SHA256 with AUTH_SECRET as key.
-    (Keeps dependencies minimal. If you want bcrypt later, we can swap it.)
-    """
     key = settings.AUTH_SECRET.encode("utf-8")
     return hmac.new(key, password.encode("utf-8"), hashlib.sha256).hexdigest()
 
@@ -46,9 +42,7 @@ def create_token(subject: str, expires_minutes: Optional[int] = None) -> str:
     exp = int(time.time()) + int(expires_minutes) * 60
     payload = {"sub": subject, "exp": exp}
     payload_bytes = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-
     sig = hmac.new(settings.AUTH_SECRET.encode("utf-8"), payload_bytes, hashlib.sha256).digest()
-
     return f"{_b64url_encode(payload_bytes)}.{_b64url_encode(sig)}"
 
 
