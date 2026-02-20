@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from sqlalchemy import String  # ✅ added
 from sqlmodel import SQLModel, Field, Column, JSON
 
 
@@ -65,8 +66,6 @@ class MessageEvent(SQLModel, table=True):
     meta: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
 
-
-
 class BrandVoiceProfile(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     created_at: datetime = Field(default_factory=utcnow, index=True)
@@ -77,3 +76,12 @@ class BrandVoiceProfile(SQLModel, table=True):
         default="Never hallucinate order status. Ask for order number. Never promise refunds. No voice-call auto answering."
     )
     extra: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+
+
+# ✅ added (User table for signup/login)
+class User(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+
+    username: str = Field(sa_column=Column(String, unique=True, index=True))
+    password_hash: str = Field(default="")
