@@ -270,118 +270,40 @@ def _normalize_for_query(s: str) -> str:
     return s
 
 
-# --- keyword helpers for strict validation ---
-_IMG_STOP = {
-    "best", "price", "cash", "delivery", "cod", "bd", "bangladesh", "premium", "quality",
-    "buy", "order", "online", "store", "shop", "new", "original", "latest",
-    "photo", "image", "product", "background", "isolated", "close", "up", "lifestyle",
-    "packaging", "portable", "smart", "pro", "mini", "for", "with",
-}
-
-_BAD_ALT = {
-    "peacock", "bird", "portrait", "model", "wedding", "baby", "cat", "dog",
-    "landscape", "mountain", "ocean", "sunset", "flower", "nature",
-    "man", "woman", "girl", "boy", "face", "people", "person", "selfie",
-}
-
-_NORM = {
-    "earbuds": "earbud", "headphones": "headphone", "speakers": "speaker", "bottles": "bottle",
-    "fans": "fan", "rollers": "roller", "watches": "watch", "chargers": "charger",
-    "cables": "cable",
-}
-
-
-def _tokenize_img(s: str) -> List[str]:
-    toks = re.findall(r"[a-z0-9]+", (s or "").lower())
-    out: List[str] = []
-    for t in toks:
-        if len(t) <= 2:
-            continue
-        t = _NORM.get(t, t)
-        if t not in out:
-            out.append(t)
-    return out
-
-
-def _important_tokens(text: str) -> List[str]:
-    toks = _tokenize_img(text)
-    return [t for t in toks if t not in _IMG_STOP and not t.isdigit()]
-
-
-def _alt_matches_product(product_title: str, alt: str | None) -> bool:
-    """
-    HARD LOCK:
-    Image must contain the MAIN product noun.
-    """
-
-    if not alt:
-        return False
-
-    alt_l = alt.lower()
-    title_l = product_title.lower()
-
-    # Extract core nouns from title (important product words)
-    important_words = [
-        "fan", "speaker", "watch", "earbud", "earbuds", "headphone",
-        "bottle", "roller", "ring light", "ring", "light",
-        "sofa", "bedsheet", "sheet", "bed", "tripod",
-        "keyboard", "mouse", "wallet", "charger",
-        "power bank", "cable"
-    ]
-
-    # Special cases (multi-word products must match full phrase)
-    if "ring light" in title_l:
-        return "ring light" in alt_l
-
-    if "power bank" in title_l:
-        return "power bank" in alt_l
-
-    # For all others: at least one strong product word must exist
-    for word in important_words:
-        if word in title_l:
-            if word in alt_l:
-                return True
-            else:
-                return False
-
-    # fallback — if no known product word, allow
-    return True
-
-
 def _build_strict_product_query(title: str) -> str:
     raw = _normalize_for_query(_strip_seo_tail_for_images(title))
 
-    # Remove marketing + generic commerce words
     stop = {
         "best", "price", "offer", "sale", "discount", "bd", "bangladesh", "cod",
         "delivery", "cash", "on", "available", "premium", "quality", "buy", "order",
         "online", "store", "shop", "new", "original", "latest", "for", "with",
-        "smart", "pro", "mini", "portable", "newest"
+        "smart", "pro", "mini", "portable", "newest", "ultra", "heavy", "duty",
     }
 
     tokens = re.findall(r"[a-z0-9]+", raw)
     tokens = [t for t in tokens if t not in stop and len(t) > 1]
     base = " ".join(tokens).strip() or raw or "product"
 
-    # “infinite” rules (expandable)
     rules: List[Tuple[str, str]] = [
+        (r"\bice roller\b", "ice roller for face skincare"),
         (r"\bneck fan\b", "wearable neck fan"),
         (r"\bsmart watch\b", "smartwatch"),
         (r"\bsmartwatch\b", "smartwatch"),
-        (r"\bearbuds\b", "wireless earbuds in ear"),
-        (r"\bearbud\b", "wireless earbuds in ear"),
+        (r"\bearbuds\b", "wireless earbuds"),
+        (r"\bearbud\b", "wireless earbuds"),
         (r"\bheadphones\b", "wireless headphones"),
         (r"\bheadphone\b", "wireless headphones"),
         (r"\bbluetooth speaker\b", "portable bluetooth speaker"),
         (r"\bspeaker\b", "portable bluetooth speaker"),
         (r"\bwater bottle\b", "water bottle"),
-        (r"\bice roller\b", "ice roller for face"),
         (r"\bsofa cover\b", "sofa cover"),
         (r"\bsofa\b", "sofa furniture"),
-        (r"\bpower bank\b", "power bank portable charger"),
-        (r"\bring light\b", "ring light"),
+        (r"\bbedsheet\b", "bed sheet set"),
+        (r"\bring light\b", "led ring light"),
         (r"\btripod\b", "phone tripod"),
-        (r"\bphone holder\b", "phone holder stand"),
+        (r"\bpower bank\b", "power bank portable charger"),
+        (r"\bcharger\b", "phone charger adapter"),
+        (r"\bcable\b", "charging cable"),
         (r"\bmouse\b", "computer mouse"),
         (r"\bkeyboard\b", "computer keyboard"),
         (r"\bwallet\b", "wallet"),
@@ -391,7 +313,6 @@ def _build_strict_product_query(title: str) -> str:
         if re.search(pat, raw):
             return forced
 
-    # fallback: keep last 6 words max
     words = base.split()
     if len(words) > 6:
         base = " ".join(words[-6:])
@@ -399,42 +320,123 @@ def _build_strict_product_query(title: str) -> str:
     return base or "product"
 
 
+# Block obvious wrong subjects (prevents jewelry/gaming/people/birds)
+_BAD_CONTEXT_TOKENS = {
+    "peacock", "bird", "animal", "cat", "dog", "flower", "nature", "landscape", "mountain", "ocean", "sunset",
+    "portrait", "model", "wedding", "baby", "man", "woman", "girl", "boy", "people", "person", "selfie", "fashion",
+    "ring", "bracelet", "necklace", "jewelry", "diamond", "gold", "silver",
+    "camera", "controller", "console", "gaming",
+}
+
+
+def _looks_obviously_wrong(alt: str | None) -> bool:
+    a = (alt or "").lower()
+    if not a:
+        return False
+    return any(t in a for t in _BAD_CONTEXT_TOKENS)
+
+
+def _required_terms_from_title(title: str) -> List[str]:
+    """
+    Main noun / phrase lock.
+    If strict lock succeeds -> super accurate.
+    """
+    t = _normalize_for_query(title)
+
+    if "ring light" in t:
+        return ["ring", "light"]
+    if "ice roller" in t:
+        return ["roller"]
+    if "power bank" in t:
+        return ["power", "bank"]
+    if "smart watch" in t or "smartwatch" in t:
+        return ["watch"]
+    if "bluetooth speaker" in t or "speaker" in t:
+        return ["speaker"]
+    if "neck fan" in t or ("fan" in t and "neck" in t):
+        return ["fan"]
+    if "bedsheet" in t or "bed sheet" in t:
+        return ["bed", "sheet"]
+
+    nouns = [
+        "fan", "speaker", "watch", "earbud", "earbuds", "headphone", "headphones",
+        "bottle", "roller", "sheet", "bed", "tripod", "keyboard", "mouse",
+        "sofa", "curtain", "charger", "cable",
+    ]
+    for n in nouns:
+        if n in t:
+            if n == "earbuds":
+                return ["earbud"]
+            if n == "headphones":
+                return ["headphone"]
+            return [n]
+    return []
+
+
+def _alt_matches_product_strict(title: str, alt: str | None) -> bool:
+    """
+    STRICT acceptance:
+    - reject obvious wrong
+    - require main noun/phrase terms
+    """
+    if not alt:
+        return False
+    if _looks_obviously_wrong(alt):
+        return False
+
+    req = _required_terms_from_title(title)
+    if not req:
+        return True
+
+    a = alt.lower()
+    return all(r in a for r in req)
+
+
 def _image_urls(title: str, niche: str) -> List[str]:
     """
-    ✅ STRICT:
-    - Search by product title only
-    - Accept only images whose ALT matches product keywords
+    Two-stage selection:
+    A) STRICT: must match product noun/phrase
+    B) FALLBACK: if strict fails, still return relevant images but reject obvious wrong.
     """
     core = _build_strict_product_query(title)
 
-    # More strict product queries
     queries = [
         f"{core} product photo",
         f"{core} isolated on white background",
-        f"{core} close up product",
-        f"{core} product packshot",
-        f"{core} product on table",
-        f"{core} in hand product",
-        f"{core} packaging product",
+        f"{core} close up",
+        f"{core} packshot",
+        f"{core} product",
+        f"{core} on table",
+        f"{core} in hand",
     ]
 
-    urls: List[str] = []
+    strict_urls: List[str] = []
+    relaxed_urls: List[str] = []
+
     for q in queries:
         r = pexels_search_image(q, orientation="square")
         if r.get("ok") and r.get("image_url"):
-            alt = r.get("alt") or ""
-            if not _alt_matches_product(title, alt):
-                # reject irrelevant image
-                continue
-
             u = str(r["image_url"])
-            if u not in urls:
-                urls.append(u)
+            alt = r.get("alt")
 
-        if len(urls) >= 7:
+            # strict bucket
+            if _alt_matches_product_strict(title, alt):
+                if u not in strict_urls:
+                    strict_urls.append(u)
+            else:
+                # relaxed bucket (still blocks obviously wrong)
+                if not _looks_obviously_wrong(alt):
+                    if u not in relaxed_urls:
+                        relaxed_urls.append(u)
+
+        if len(strict_urls) >= 7:
             break
 
-    return urls
+    if strict_urls:
+        return strict_urls[:7]
+
+    # ✅ fallback prevents "no media" case
+    return relaxed_urls[:7]
 
 
 def add_product_full_auto(
@@ -471,7 +473,7 @@ def add_product_full_auto(
     market_signals = (r.get("market_signals") or []) if isinstance(r, dict) else []
     body_html = _seo_description_bd(seo_title, product_type, short_desc, keys, market_signals)
 
-    # ✅ IMPORTANT: use base_title to match the real product name
+    # ✅ IMPORTANT: use base_title for image search
     urls = _image_urls(base_title, product_type)
     image_url = urls[0] if urls else None
 
