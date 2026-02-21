@@ -310,28 +310,42 @@ def _important_tokens(text: str) -> List[str]:
 
 def _alt_matches_product(product_title: str, alt: str | None) -> bool:
     """
-    HARD RULE:
-    Accept an image only if its alt text contains important product keywords.
+    HARD LOCK:
+    Image must contain the MAIN product noun.
     """
-    alt_l = (alt or "").lower()
-    if not alt_l:
-        return False
-    if any(b in alt_l for b in _BAD_ALT):
+
+    if not alt:
         return False
 
-    want = _important_tokens(product_title)
-    got = set(_important_tokens(alt_l))
+    alt_l = alt.lower()
+    title_l = product_title.lower()
 
-    # If title tokens are too weak, allow (but usually this won't happen)
-    if not want:
-        return True
+    # Extract core nouns from title (important product words)
+    important_words = [
+        "fan", "speaker", "watch", "earbud", "earbuds", "headphone",
+        "bottle", "roller", "ring light", "ring", "light",
+        "sofa", "bedsheet", "sheet", "bed", "tripod",
+        "keyboard", "mouse", "wallet", "charger",
+        "power bank", "cable"
+    ]
 
-    # Require at least 1 strong match (or 2 if title has many tokens)
-    matches = sum(1 for t in want if t in got)
+    # Special cases (multi-word products must match full phrase)
+    if "ring light" in title_l:
+        return "ring light" in alt_l
 
-    if len(want) >= 4:
-        return matches >= 2
-    return matches >= 1
+    if "power bank" in title_l:
+        return "power bank" in alt_l
+
+    # For all others: at least one strong product word must exist
+    for word in important_words:
+        if word in title_l:
+            if word in alt_l:
+                return True
+            else:
+                return False
+
+    # fallback — if no known product word, allow
+    return True
 
 
 def _build_strict_product_query(title: str) -> str:
