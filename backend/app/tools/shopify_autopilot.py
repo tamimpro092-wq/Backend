@@ -249,58 +249,94 @@ def _seo_description_bd(
 """.strip()
 
 
+# ============================
+# ✅ IMAGE LOGIC (ONLY CHANGE)
+# ============================
+
 def _strip_seo_tail_for_images(title: str) -> str:
     """
-    ✅ CRITICAL FIX: remove '– Best Price | Cash on Delivery BD' before image search,
-    otherwise Pexels returns random irrelevant results.
+    Remove marketing/SEO tails so image search focuses on the real product name.
     """
     s = (title or "").strip()
 
-    # Remove common tail patterns
+    # Remove BD marketing tail patterns
     s = re.sub(r"\s*[–\-]\s*best price\s*\|\s*cash on delivery bd\s*$", "", s, flags=re.I)
     s = re.sub(r"\s*\|\s*cash on delivery bd\s*$", "", s, flags=re.I)
     s = re.sub(r"\s*\|\s*cod bd\s*$", "", s, flags=re.I)
 
-    # Also remove any long separator tail after '–' if it contains delivery/cod keywords
-    s = re.sub(r"\s*[–\-]\s*.*\b(cod|delivery|bangladesh)\b.*$", "", s, flags=re.I).strip()
+    # Remove any tail that contains delivery/cod/bangladesh keywords
+    s = re.sub(r"\s*[–\-]\s*.*\b(cod|delivery|bangladesh|bd)\b.*$", "", s, flags=re.I).strip()
 
-    # last tidy
+    # Final tidy
     s = re.sub(r"\s+", " ", s).strip()
     return s or (title or "product")
 
 
+def _build_strict_product_query(title: str) -> str:
+    """
+    Build a STRICT product-only query so Pexels doesn't return random niche content.
+    """
+    s = _strip_seo_tail_for_images(title).lower()
+
+    # Remove marketing + generic commerce words
+    stop = {
+        "best", "price", "offer", "sale", "discount", "bd", "bangladesh", "cod",
+        "delivery", "cash", "on", "available", "premium", "quality", "buy", "order",
+        "online", "store", "shop", "new", "original", "latest"
+    }
+
+    tokens = re.findall(r"[a-z0-9]+", s)
+    tokens = [t for t in tokens if t not in stop and len(t) > 1]
+
+    if not tokens:
+        return "product"
+
+    # Keep last few tokens (usually most product-specific)
+    if len(tokens) > 6:
+        tokens = tokens[-6:]
+
+    return " ".join(tokens).strip() or "product"
+
+
 def _image_urls(title: str, niche: str) -> List[str]:
     """
-    Try to fetch 5–7 image URLs. If Pexels fails, still return at least 1 if possible.
-
-    ✅ UPDATED:
-    - uses clean_title for search
-    - uses multiple relevant queries
-    - avoids duplicates
+    ✅ Your requirement:
+    - Image search must follow the REAL PRODUCT, not the niche ("summer").
+    - So we search ONLY using product title keywords.
     """
-    clean_title = _strip_seo_tail_for_images(title)
-    clean_niche = _safe_product_type(niche)
+    core = _build_strict_product_query(title)
 
+    # Strict product-based queries (no niche usage)
     queries = [
-        f"{clean_title} white background product photo",
-        f"{clean_title} product photo",
-        f"{clean_title} lifestyle use photo",
-        f"{clean_title} close up detail photo",
-        f"{clean_title} packaging photo",
-        f"{clean_niche} product photo",
-        f"{clean_title} in hand photo",
+        f"{core} product photo",
+        f"{core} white background product",
+        f"{core} close up product",
+        f"{core} in hand product",
+        f"{core} lifestyle product",
+        f"{core} packaging product",
+        f"{core} isolated product",
     ]
+
+    bad_tokens = {"flower", "portrait", "model", "wedding", "baby", "nature", "cat", "dog", "landscape"}
 
     urls: List[str] = []
     for q in queries:
         r = pexels_search_image(q, orientation="square")
         if r.get("ok") and r.get("image_url"):
-            u = r["image_url"]
+            u = str(r["image_url"])
+            test = (q + " " + u).lower()
+            if any(bt in test for bt in bad_tokens):
+                continue
             if u not in urls:
                 urls.append(u)
         if len(urls) >= 7:
             break
 
+    # Ensure at least 1 image if possible
+    if not urls:
+        r = pexels_search_image(f"{core} product", orientation="square")
+        if r.get("ok") and r.get("image_url"):
+            urls.append(str(r["image_url"]))
     return urls
 
 
@@ -343,8 +379,8 @@ def add_product_full_auto(
     market_signals = (r.get("market_signals") or []) if isinstance(r, dict) else []
     body_html = _seo_description_bd(seo_title, product_type, short_desc, keys, market_signals)
 
-    # 4) Images (5–7) ✅ now using clean_title
-    urls = _image_urls(seo_title, product_type)
+    # 4) Images (5–7) ✅ IMPORTANT: use base_title so images follow the actual product
+    urls = _image_urls(base_title, product_type)
     image_url = urls[0] if urls else None
 
     # 5) Variants
