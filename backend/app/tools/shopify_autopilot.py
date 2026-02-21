@@ -259,54 +259,157 @@ def _strip_seo_tail_for_images(title: str) -> str:
     """
     s = (title or "").strip()
 
-    # Remove BD marketing tail patterns
     s = re.sub(r"\s*[–\-]\s*best price\s*\|\s*cash on delivery bd\s*$", "", s, flags=re.I)
     s = re.sub(r"\s*\|\s*cash on delivery bd\s*$", "", s, flags=re.I)
     s = re.sub(r"\s*\|\s*cod bd\s*$", "", s, flags=re.I)
-
-    # Remove any tail that contains delivery/cod/bangladesh keywords
     s = re.sub(r"\s*[–\-]\s*.*\b(cod|delivery|bangladesh|bd)\b.*$", "", s, flags=re.I).strip()
 
-    # Final tidy
     s = re.sub(r"\s+", " ", s).strip()
     return s or (title or "product")
 
 
+def _normalize_for_query(s: str) -> str:
+    s = (s or "").lower()
+    s = re.sub(r"[^a-z0-9\s]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
 def _build_strict_product_query(title: str) -> str:
     """
-    Build a STRICT product-only query so Pexels doesn't return random niche content.
+    ✅ "Infinity keyword rule":
+    - Convert product title into a strict product query for Pexels.
+    - Apply pattern rules (expandable) to force correct category words.
+    - Never uses niche like "summer" for search.
     """
-    s = _strip_seo_tail_for_images(title).lower()
+    raw = _normalize_for_query(_strip_seo_tail_for_images(title))
 
-    # Remove marketing + generic commerce words
+    # Remove common marketing/generic words
     stop = {
         "best", "price", "offer", "sale", "discount", "bd", "bangladesh", "cod",
         "delivery", "cash", "on", "available", "premium", "quality", "buy", "order",
-        "online", "store", "shop", "new", "original", "latest"
+        "online", "store", "shop", "new", "original", "latest", "for", "with",
+        "smart", "pro", "mini", "portable", "newest"
     }
 
-    tokens = re.findall(r"[a-z0-9]+", s)
+    tokens = re.findall(r"[a-z0-9]+", raw)
     tokens = [t for t in tokens if t not in stop and len(t) > 1]
+    base = " ".join(tokens).strip() or raw or "product"
 
-    if not tokens:
-        return "product"
+    # Rules: first match wins. Add more anytime (this is your "infinite" area).
+    # Each rule is (regex_pattern, forced_query)
+    rules: List[Tuple[str, str]] = [
+        # Cooling / summer
+        (r"\bneck fan\b", "wearable neck fan device"),
+        (r"\bhand fan\b", "portable handheld fan"),
+        (r"\bmini fan\b", "portable mini fan"),
+        (r"\btable fan\b", "small desk fan"),
 
-    # Keep last few tokens (usually most product-specific)
-    if len(tokens) > 6:
-        tokens = tokens[-6:]
+        # Bottles / hydration
+        (r"\bwater bottle\b", "water bottle"),
+        (r"\bthermal bottle\b", "thermal water bottle"),
+        (r"\bvacuum flask\b", "vacuum flask bottle"),
+        (r"\bthermos\b", "thermos bottle"),
+        (r"\bjuice bottle\b", "juice bottle"),
+        (r"\bprotein shaker\b", "protein shaker bottle"),
+        (r"\bshaker bottle\b", "shaker bottle"),
 
-    return " ".join(tokens).strip() or "product"
+        # Audio
+        (r"\bbluetooth speaker\b", "portable bluetooth speaker"),
+        (r"\bportable speaker\b", "portable bluetooth speaker"),
+        (r"\bspeaker\b", "portable bluetooth speaker"),
+        (r"\bearbuds\b", "wireless earbuds in ear"),
+        (r"\bearbud\b", "wireless earbuds in ear"),
+        (r"\bin ear\b", "wireless earbuds in ear"),
+        (r"\bheadphone\b", "wireless headphones"),
+        (r"\bheadphones\b", "wireless headphones"),
+        (r"\bearphone\b", "in ear earphones"),
+
+        # Power / charging
+        (r"\bpower bank\b", "power bank portable charger"),
+        (r"\bportable charger\b", "power bank portable charger"),
+        (r"\bfast charger\b", "fast phone charger adapter"),
+        (r"\bcharger\b", "phone charger adapter"),
+        (r"\bcharging cable\b", "phone charging cable"),
+        (r"\btype c\b", "usb type c cable"),
+        (r"\blightning\b", "iphone lightning cable"),
+
+        # Watches / wearables
+        (r"\bsmart watch\b", "smartwatch"),
+        (r"\bsmartwatch\b", "smartwatch"),
+        (r"\bfitness band\b", "fitness tracker band"),
+
+        # Home / furniture
+        (r"\bsofa cover\b", "sofa cover"),
+        (r"\bsofa\b", "sofa furniture"),
+        (r"\bcushion cover\b", "cushion cover pillowcase"),
+        (r"\bpillow cover\b", "pillow cover"),
+        (r"\bbedsheet\b", "bed sheet set"),
+        (r"\bcurtain\b", "window curtain"),
+
+        # Kitchen
+        (r"\bair fryer\b", "air fryer"),
+        (r"\bblender\b", "kitchen blender"),
+        (r"\bchopper\b", "vegetable chopper"),
+        (r"\bknife\b", "kitchen knife"),
+        (r"\bcutting board\b", "cutting board"),
+        (r"\bwater filter\b", "water filter"),
+
+        # Beauty / skincare
+        (r"\bice roller\b", "ice roller for face skincare"),
+        (r"\bface roller\b", "face roller skincare"),
+        (r"\bserum\b", "skincare serum bottle"),
+        (r"\bmoisturizer\b", "skin moisturizer cream"),
+        (r"\bsunscreen\b", "sunscreen lotion"),
+        (r"\bperfume\b", "perfume bottle"),
+        (r"\bdeodorant\b", "deodorant spray"),
+        (r"\bhair oil\b", "hair oil bottle"),
+
+        # Lighting / camera
+        (r"\bring light\b", "ring light"),
+        (r"\btripod\b", "phone tripod"),
+        (r"\bcamera\b", "camera product"),
+        (r"\bwebcam\b", "webcam"),
+
+        # Bags
+        (r"\bbackpack\b", "backpack bag"),
+        (r"\bhandbag\b", "handbag"),
+        (r"\bwallet\b", "wallet"),
+        (r"\btravel bag\b", "travel bag"),
+
+        # Shoes
+        (r"\bsneaker\b", "sneakers shoes"),
+        (r"\bshoe\b", "shoes"),
+        (r"\bsandals\b", "sandals"),
+
+        # Misc
+        (r"\bphone holder\b", "phone holder stand"),
+        (r"\bcar mount\b", "car phone mount"),
+        (r"\bmouse\b", "computer mouse"),
+        (r"\bkeyboard\b", "computer keyboard"),
+    ]
+
+    # Apply rules on normalized raw text
+    for pat, forced in rules:
+        if re.search(pat, raw):
+            return forced
+
+    # Fallback tightening: keep last up to 6 words
+    words = base.split()
+    if len(words) > 6:
+        base = " ".join(words[-6:])
+
+    return base or "product"
 
 
 def _image_urls(title: str, niche: str) -> List[str]:
     """
     ✅ Your requirement:
-    - Image search must follow the REAL PRODUCT, not the niche ("summer").
-    - So we search ONLY using product title keywords.
+    - Image search must follow the REAL PRODUCT.
+    - NEVER search using niche like "summer".
     """
     core = _build_strict_product_query(title)
 
-    # Strict product-based queries (no niche usage)
     queries = [
         f"{core} product photo",
         f"{core} white background product",
@@ -317,7 +420,8 @@ def _image_urls(title: str, niche: str) -> List[str]:
         f"{core} isolated product",
     ]
 
-    bad_tokens = {"flower", "portrait", "model", "wedding", "baby", "nature", "cat", "dog", "landscape"}
+    # Light filtering (still useful if stock_images picks random)
+    bad_tokens = {"flower", "portrait", "model", "wedding", "baby", "nature", "cat", "dog", "landscape", "peacock", "bird"}
 
     urls: List[str] = []
     for q in queries:
@@ -337,6 +441,7 @@ def _image_urls(title: str, niche: str) -> List[str]:
         r = pexels_search_image(f"{core} product", orientation="square")
         if r.get("ok") and r.get("image_url"):
             urls.append(str(r["image_url"]))
+
     return urls
 
 
