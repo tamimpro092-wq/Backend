@@ -254,16 +254,11 @@ def _seo_description_bd(
 # ============================
 
 def _strip_seo_tail_for_images(title: str) -> str:
-    """
-    Remove marketing/SEO tails so image search focuses on the real product name.
-    """
     s = (title or "").strip()
-
     s = re.sub(r"\s*[–\-]\s*best price\s*\|\s*cash on delivery bd\s*$", "", s, flags=re.I)
     s = re.sub(r"\s*\|\s*cash on delivery bd\s*$", "", s, flags=re.I)
     s = re.sub(r"\s*\|\s*cod bd\s*$", "", s, flags=re.I)
     s = re.sub(r"\s*[–\-]\s*.*\b(cod|delivery|bangladesh|bd)\b.*$", "", s, flags=re.I).strip()
-
     s = re.sub(r"\s+", " ", s).strip()
     return s or (title or "product")
 
@@ -275,16 +270,74 @@ def _normalize_for_query(s: str) -> str:
     return s
 
 
+# --- keyword helpers for strict validation ---
+_IMG_STOP = {
+    "best", "price", "cash", "delivery", "cod", "bd", "bangladesh", "premium", "quality",
+    "buy", "order", "online", "store", "shop", "new", "original", "latest",
+    "photo", "image", "product", "background", "isolated", "close", "up", "lifestyle",
+    "packaging", "portable", "smart", "pro", "mini", "for", "with",
+}
+
+_BAD_ALT = {
+    "peacock", "bird", "portrait", "model", "wedding", "baby", "cat", "dog",
+    "landscape", "mountain", "ocean", "sunset", "flower", "nature",
+    "man", "woman", "girl", "boy", "face", "people", "person", "selfie",
+}
+
+_NORM = {
+    "earbuds": "earbud", "headphones": "headphone", "speakers": "speaker", "bottles": "bottle",
+    "fans": "fan", "rollers": "roller", "watches": "watch", "chargers": "charger",
+    "cables": "cable",
+}
+
+
+def _tokenize_img(s: str) -> List[str]:
+    toks = re.findall(r"[a-z0-9]+", (s or "").lower())
+    out: List[str] = []
+    for t in toks:
+        if len(t) <= 2:
+            continue
+        t = _NORM.get(t, t)
+        if t not in out:
+            out.append(t)
+    return out
+
+
+def _important_tokens(text: str) -> List[str]:
+    toks = _tokenize_img(text)
+    return [t for t in toks if t not in _IMG_STOP and not t.isdigit()]
+
+
+def _alt_matches_product(product_title: str, alt: str | None) -> bool:
+    """
+    HARD RULE:
+    Accept an image only if its alt text contains important product keywords.
+    """
+    alt_l = (alt or "").lower()
+    if not alt_l:
+        return False
+    if any(b in alt_l for b in _BAD_ALT):
+        return False
+
+    want = _important_tokens(product_title)
+    got = set(_important_tokens(alt_l))
+
+    # If title tokens are too weak, allow (but usually this won't happen)
+    if not want:
+        return True
+
+    # Require at least 1 strong match (or 2 if title has many tokens)
+    matches = sum(1 for t in want if t in got)
+
+    if len(want) >= 4:
+        return matches >= 2
+    return matches >= 1
+
+
 def _build_strict_product_query(title: str) -> str:
-    """
-    ✅ "Infinity keyword rule":
-    - Convert product title into a strict product query for Pexels.
-    - Apply pattern rules (expandable) to force correct category words.
-    - Never uses niche like "summer" for search.
-    """
     raw = _normalize_for_query(_strip_seo_tail_for_images(title))
 
-    # Remove common marketing/generic words
+    # Remove marketing + generic commerce words
     stop = {
         "best", "price", "offer", "sale", "discount", "bd", "bangladesh", "cod",
         "delivery", "cash", "on", "available", "premium", "quality", "buy", "order",
@@ -296,105 +349,35 @@ def _build_strict_product_query(title: str) -> str:
     tokens = [t for t in tokens if t not in stop and len(t) > 1]
     base = " ".join(tokens).strip() or raw or "product"
 
-    # Rules: first match wins. Add more anytime (this is your "infinite" area).
-    # Each rule is (regex_pattern, forced_query)
+    # “infinite” rules (expandable)
     rules: List[Tuple[str, str]] = [
-        # Cooling / summer
-        (r"\bneck fan\b", "wearable neck fan device"),
-        (r"\bhand fan\b", "portable handheld fan"),
-        (r"\bmini fan\b", "portable mini fan"),
-        (r"\btable fan\b", "small desk fan"),
-
-        # Bottles / hydration
-        (r"\bwater bottle\b", "water bottle"),
-        (r"\bthermal bottle\b", "thermal water bottle"),
-        (r"\bvacuum flask\b", "vacuum flask bottle"),
-        (r"\bthermos\b", "thermos bottle"),
-        (r"\bjuice bottle\b", "juice bottle"),
-        (r"\bprotein shaker\b", "protein shaker bottle"),
-        (r"\bshaker bottle\b", "shaker bottle"),
-
-        # Audio
-        (r"\bbluetooth speaker\b", "portable bluetooth speaker"),
-        (r"\bportable speaker\b", "portable bluetooth speaker"),
-        (r"\bspeaker\b", "portable bluetooth speaker"),
-        (r"\bearbuds\b", "wireless earbuds in ear"),
-        (r"\bearbud\b", "wireless earbuds in ear"),
-        (r"\bin ear\b", "wireless earbuds in ear"),
-        (r"\bheadphone\b", "wireless headphones"),
-        (r"\bheadphones\b", "wireless headphones"),
-        (r"\bearphone\b", "in ear earphones"),
-
-        # Power / charging
-        (r"\bpower bank\b", "power bank portable charger"),
-        (r"\bportable charger\b", "power bank portable charger"),
-        (r"\bfast charger\b", "fast phone charger adapter"),
-        (r"\bcharger\b", "phone charger adapter"),
-        (r"\bcharging cable\b", "phone charging cable"),
-        (r"\btype c\b", "usb type c cable"),
-        (r"\blightning\b", "iphone lightning cable"),
-
-        # Watches / wearables
+        (r"\bneck fan\b", "wearable neck fan"),
         (r"\bsmart watch\b", "smartwatch"),
         (r"\bsmartwatch\b", "smartwatch"),
-        (r"\bfitness band\b", "fitness tracker band"),
-
-        # Home / furniture
+        (r"\bearbuds\b", "wireless earbuds in ear"),
+        (r"\bearbud\b", "wireless earbuds in ear"),
+        (r"\bheadphones\b", "wireless headphones"),
+        (r"\bheadphone\b", "wireless headphones"),
+        (r"\bbluetooth speaker\b", "portable bluetooth speaker"),
+        (r"\bspeaker\b", "portable bluetooth speaker"),
+        (r"\bwater bottle\b", "water bottle"),
+        (r"\bice roller\b", "ice roller for face"),
         (r"\bsofa cover\b", "sofa cover"),
         (r"\bsofa\b", "sofa furniture"),
-        (r"\bcushion cover\b", "cushion cover pillowcase"),
-        (r"\bpillow cover\b", "pillow cover"),
-        (r"\bbedsheet\b", "bed sheet set"),
-        (r"\bcurtain\b", "window curtain"),
-
-        # Kitchen
-        (r"\bair fryer\b", "air fryer"),
-        (r"\bblender\b", "kitchen blender"),
-        (r"\bchopper\b", "vegetable chopper"),
-        (r"\bknife\b", "kitchen knife"),
-        (r"\bcutting board\b", "cutting board"),
-        (r"\bwater filter\b", "water filter"),
-
-        # Beauty / skincare
-        (r"\bice roller\b", "ice roller for face skincare"),
-        (r"\bface roller\b", "face roller skincare"),
-        (r"\bserum\b", "skincare serum bottle"),
-        (r"\bmoisturizer\b", "skin moisturizer cream"),
-        (r"\bsunscreen\b", "sunscreen lotion"),
-        (r"\bperfume\b", "perfume bottle"),
-        (r"\bdeodorant\b", "deodorant spray"),
-        (r"\bhair oil\b", "hair oil bottle"),
-
-        # Lighting / camera
+        (r"\bpower bank\b", "power bank portable charger"),
         (r"\bring light\b", "ring light"),
         (r"\btripod\b", "phone tripod"),
-        (r"\bcamera\b", "camera product"),
-        (r"\bwebcam\b", "webcam"),
-
-        # Bags
-        (r"\bbackpack\b", "backpack bag"),
-        (r"\bhandbag\b", "handbag"),
-        (r"\bwallet\b", "wallet"),
-        (r"\btravel bag\b", "travel bag"),
-
-        # Shoes
-        (r"\bsneaker\b", "sneakers shoes"),
-        (r"\bshoe\b", "shoes"),
-        (r"\bsandals\b", "sandals"),
-
-        # Misc
         (r"\bphone holder\b", "phone holder stand"),
-        (r"\bcar mount\b", "car phone mount"),
         (r"\bmouse\b", "computer mouse"),
         (r"\bkeyboard\b", "computer keyboard"),
+        (r"\bwallet\b", "wallet"),
     ]
 
-    # Apply rules on normalized raw text
     for pat, forced in rules:
         if re.search(pat, raw):
             return forced
 
-    # Fallback tightening: keep last up to 6 words
+    # fallback: keep last 6 words max
     words = base.split()
     if len(words) > 6:
         base = " ".join(words[-6:])
@@ -404,43 +387,38 @@ def _build_strict_product_query(title: str) -> str:
 
 def _image_urls(title: str, niche: str) -> List[str]:
     """
-    ✅ Your requirement:
-    - Image search must follow the REAL PRODUCT.
-    - NEVER search using niche like "summer".
+    ✅ STRICT:
+    - Search by product title only
+    - Accept only images whose ALT matches product keywords
     """
     core = _build_strict_product_query(title)
 
+    # More strict product queries
     queries = [
         f"{core} product photo",
-        f"{core} white background product",
+        f"{core} isolated on white background",
         f"{core} close up product",
+        f"{core} product packshot",
+        f"{core} product on table",
         f"{core} in hand product",
-        f"{core} lifestyle product",
         f"{core} packaging product",
-        f"{core} isolated product",
     ]
-
-    # Light filtering (still useful if stock_images picks random)
-    bad_tokens = {"flower", "portrait", "model", "wedding", "baby", "nature", "cat", "dog", "landscape", "peacock", "bird"}
 
     urls: List[str] = []
     for q in queries:
         r = pexels_search_image(q, orientation="square")
         if r.get("ok") and r.get("image_url"):
-            u = str(r["image_url"])
-            test = (q + " " + u).lower()
-            if any(bt in test for bt in bad_tokens):
+            alt = r.get("alt") or ""
+            if not _alt_matches_product(title, alt):
+                # reject irrelevant image
                 continue
+
+            u = str(r["image_url"])
             if u not in urls:
                 urls.append(u)
+
         if len(urls) >= 7:
             break
-
-    # Ensure at least 1 image if possible
-    if not urls:
-        r = pexels_search_image(f"{core} product", orientation="square")
-        if r.get("ok") and r.get("image_url"):
-            urls.append(str(r["image_url"]))
 
     return urls
 
@@ -449,12 +427,10 @@ def add_product_full_auto(
     niche: str | None = None,
     inventory_qty: int | None = None,
 ) -> Dict[str, Any]:
-    # IMPORTANT: raw niche might accidentally include the whole command text
     raw_niche = (niche or getattr(settings, "STORE_NICHE", "") or "general").strip()
     niche_list = [x.strip() for x in raw_niche.split(",") if x.strip()]
     qty = int(inventory_qty or getattr(settings, "DEFAULT_INVENTORY_QTY", 100) or 100)
 
-    # 1) Research (catalog-based, avoids repeats via research_multisource.py)
     if len(niche_list) <= 1:
         niche_guess = niche_list[0] if niche_list else "general"
         niche_final = _clean_product_type(niche_guess)
@@ -466,7 +442,6 @@ def add_product_full_auto(
     if not r.get("ok"):
         return {"ok": False, "error": "live_research_failed", "details": r}
 
-    # ✅ FINAL SAFE product_type for Shopify (prevents 422 forever)
     product_type = _safe_product_type(niche_final)
 
     top = r["top_pick"]
@@ -474,24 +449,20 @@ def add_product_full_auto(
     short_desc = top.get("description") or "High-demand product for everyday use."
     cost_bd = float(top.get("suggested_cost") or 500.0)
 
-    # 2) Pricing
     price, compare_at = _make_price_bd(cost_bd)
 
-    # 3) SEO title/keywords/tags/description
     seo_title = _seo_title_bd(base_title, product_type)
     keys = _keywords(seo_title, product_type)
     tags = _tags_from_keywords(keys)
     market_signals = (r.get("market_signals") or []) if isinstance(r, dict) else []
     body_html = _seo_description_bd(seo_title, product_type, short_desc, keys, market_signals)
 
-    # 4) Images (5–7) ✅ IMPORTANT: use base_title so images follow the actual product
+    # ✅ IMPORTANT: use base_title to match the real product name
     urls = _image_urls(base_title, product_type)
     image_url = urls[0] if urls else None
 
-    # 5) Variants
     variants = _variants(seo_title, product_type, price, compare_at, qty)
 
-    # 6) DRY_RUN / missing creds
     if bool(settings.DRY_RUN) or not (settings.SHOPIFY_SHOP and settings.SHOPIFY_ACCESS_TOKEN):
         with Session(engine) as session:
             draft = ProductDraft(
@@ -528,7 +499,6 @@ def add_product_full_auto(
             "note": "DRY_RUN or missing Shopify creds: product not created in Shopify.",
         }
 
-    # 7) Create product in Shopify
     create_url = f"https://{settings.SHOPIFY_SHOP}/admin/api/{settings.SHOPIFY_API_VERSION}/products.json"
 
     payload: Dict[str, Any] = {
@@ -536,7 +506,7 @@ def add_product_full_auto(
             "title": seo_title,
             "body_html": body_html,
             "vendor": settings.BRAND_NAME,
-            "product_type": product_type,  # ✅ SAFE VALUE
+            "product_type": product_type,
             "tags": tags,
             "handle": _slugify(seo_title),
             "status": "active",
